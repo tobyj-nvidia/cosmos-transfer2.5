@@ -66,8 +66,9 @@ def test_batch_inference_real(
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
     
-    # Create setup args
+    # Create setup args - model="depth" since we're using depth videos
     setup_args = SetupArguments(
+        model="depth",  # Required: use depth model since inputs are depth videos
         output_dir=output_path,
         disable_guardrails=True,  # Skip for testing
     )
