@@ -170,8 +170,12 @@ class ControlVideo2WorldInference:
 
         self.model = model
         self.config = config
-        self.batch_size = 1
+        self.batch_size = 1  # Default, can be updated for batch inference
         self.benchmark_timer = benchmark_timer
+
+    def set_batch_size(self, batch_size: int):
+        """Set batch size for batched inference."""
+        self.batch_size = batch_size
 
     def _get_data_batch_input(
         self,
@@ -230,6 +234,76 @@ class ControlVideo2WorldInference:
         if negative_prompt is not None:
             assert self.neg_t5_embeddings is not None, "Negative prompt embedding is not computed."
             data_batch["neg_t5_text_embeddings"] = self.neg_t5_embeddings
+
+        return data_batch
+
+    def _get_batched_data_batch_input(
+        self,
+        videos: list[torch.Tensor],
+        prev_outputs: list[torch.Tensor],
+        text_embeddings: list[torch.Tensor],
+        fps: int,
+        negative_prompt: str = None,
+        control_weight: str = "1.0",
+        image_contexts: list[torch.Tensor] = None,
+    ) -> dict[str, torch.Tensor]:
+        """
+        Prepares a batched input data batch for parallel inference.
+
+        Args:
+            videos: List of input video tensors, each (1, C, T, H, W)
+            prev_outputs: List of previous output tensors, each (1, C, T, H, W)
+            text_embeddings: List of text embedding tensors
+            fps: Frames per second
+            negative_prompt: Optional negative prompt
+            control_weight: Control weight string
+            image_contexts: Optional list of image context tensors
+
+        Returns:
+            dict: Batched data dictionary with tensors stacked along batch dimension
+        """
+        batch_size = len(videos)
+        self.batch_size = batch_size
+
+        # Stack videos along batch dimension
+        video_batch = torch.cat(videos, dim=0)  # (B, C, T, H, W)
+        prev_output_batch = torch.cat(prev_outputs, dim=0)  # (B, C, T, H, W)
+        text_embedding_batch = torch.cat(text_embeddings, dim=0)  # (B, ...)
+
+        B, C, T, H, W = prev_output_batch.shape
+        input_key = "video" if T > 1 else "images"
+
+        data_batch = {
+            "dataset_name": "video_data",
+            input_key: prev_output_batch.squeeze(2),
+            "t5_text_embeddings": text_embedding_batch,
+            "fps": torch.randint(16, 32, (batch_size,)).cuda(),
+            "padding_mask": torch.zeros(batch_size, 1, H, W, device="cuda"),
+            "num_conditional_frames": 1,
+            "control_weight": [float(w) for w in control_weight.split(",")],
+            "input_video": video_batch,
+        }
+
+        # Move tensors to GPU and convert to bfloat16
+        for k, v in data_batch.items():
+            if isinstance(v, torch.Tensor) and torch.is_floating_point(data_batch[k]):
+                data_batch[k] = v.to(dtype=torch.bfloat16, device="cuda", non_blocking=True)
+
+        # Add batched image context
+        if image_contexts is not None and all(ic is not None for ic in image_contexts):
+            image_context_batch = torch.cat(image_contexts, dim=0)
+            data_batch["image_context"] = image_context_batch.to(
+                dtype=torch.bfloat16, device="cuda", non_blocking=True
+            ).contiguous()
+
+        # Handle negative prompts
+        if negative_prompt is not None:
+            assert self.neg_t5_embeddings is not None, "Negative prompt embedding is not computed."
+            # Repeat neg embeddings for batch
+            if self.neg_t5_embeddings.shape[0] == 1:
+                data_batch["neg_t5_text_embeddings"] = self.neg_t5_embeddings.repeat(batch_size, 1, 1)
+            else:
+                data_batch["neg_t5_text_embeddings"] = self.neg_t5_embeddings
 
         return data_batch
 
@@ -468,11 +542,12 @@ class ControlVideo2WorldInference:
                 log.info(f"Seed: {seed}")
 
                 # Generate and decode video
+                # n_sample=None lets the model auto-detect batch size from data_batch
                 if distillation == "dmd2":
                     log.info("Generating samples using DMD2 distillation...")
                     sample = self.model.generate_samples_from_batch_dmd2(
                         data_batch,
-                        n_sample=1,
+                        n_sample=None,  # Auto-detect from data_batch for batch inference
                         num_steps=num_steps,
                         guidance=guidance,
                         seed=seed,
@@ -480,7 +555,7 @@ class ControlVideo2WorldInference:
                 else:
                     sample = self.model.generate_samples_from_batch(
                         data_batch,
-                        n_sample=1,
+                        n_sample=None,  # Auto-detect from data_batch for batch inference
                         guidance=guidance,
                         seed=seed,
                         is_negative_prompt=negative_prompt is not None,
@@ -488,7 +563,7 @@ class ControlVideo2WorldInference:
                         sigma_max=sigma_max,
                         num_steps=num_steps,
                     )
-                video = self.model.decode(sample)  # Shape: (1, C, T, H, W)
+                video = self.model.decode(sample)  # Shape: (B, C, T, H, W)
 
                 # For visualization: concatenate condition and input videos with generated video
                 video_cat = video
