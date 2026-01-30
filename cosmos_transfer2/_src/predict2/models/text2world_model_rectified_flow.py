@@ -588,10 +588,11 @@ class Text2WorldModelRectifiedFlow(ImaginaireModel):
             timestep = torch.stack(timestep)
 
             velocity_pred = velocity_fn(noise, latent_model_input, timestep.unsqueeze(0))
-            temp_x0 = self.sample_scheduler.step(
-                velocity_pred.unsqueeze(0), t, latents[0].unsqueeze(0), return_dict=False, generator=seed_g
+            # Process full batch through scheduler (fixed from latents[0] which only took first sample)
+            prev_sample = self.sample_scheduler.step(
+                velocity_pred, t, latents, return_dict=False, generator=seed_g
             )[0]
-            latents = temp_x0.squeeze(0)
+            latents = prev_sample
 
         if self.net.is_context_parallel_enabled:
             if use_spatial_split:
@@ -714,10 +715,11 @@ class Text2WorldModelRectifiedFlow(ImaginaireModel):
             timestep = torch.stack(timestep)
 
             velocity_pred = velocity_fn(noise, latent_model_input, timestep.unsqueeze(0))
-            temp_x0 = self.sample_scheduler.step(
-                velocity_pred.unsqueeze(0), t, latents[0].unsqueeze(0), return_dict=False, generator=seed_g
+            # Process full batch through scheduler (fixed from latents[0] which only took first sample)
+            prev_sample = self.sample_scheduler.step(
+                velocity_pred, t, latents, return_dict=False, generator=seed_g
             )[0]
-            latents = temp_x0.squeeze(0)
+            latents = prev_sample
 
         # Re-enable LoRA if it was disabled
         if lora_disabled:
