@@ -115,7 +115,7 @@ def test_full_diffusion_loop_batch():
         num_train_timesteps=1000, shift=1, use_dynamic_shifting=False
     )
     num_steps = 4
-    scheduler.set_timesteps(num_steps=num_steps, device="cuda")
+    scheduler.set_timesteps(num_inference_steps=num_steps, device="cuda")
     
     batch_size = 2
     latent_shape = (batch_size, 16, 24, 90, 160)
