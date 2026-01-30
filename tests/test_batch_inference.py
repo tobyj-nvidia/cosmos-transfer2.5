@@ -26,7 +26,7 @@ def test_batch_scheduler_step():
     scheduler = FlowUniPCMultistepScheduler(
         num_train_timesteps=1000, shift=1, use_dynamic_shifting=False
     )
-    scheduler.set_timesteps(num_steps=4, device="cuda")
+    scheduler.set_timesteps(num_inference_steps=4, device="cuda")
     
     # Test with batch_size=1
     model_output_1 = torch.randn(1, 16, 24, 90, 160, device="cuda", dtype=torch.bfloat16)
@@ -41,7 +41,7 @@ def test_batch_scheduler_step():
     scheduler = FlowUniPCMultistepScheduler(
         num_train_timesteps=1000, shift=1, use_dynamic_shifting=False
     )
-    scheduler.set_timesteps(num_steps=4, device="cuda")
+    scheduler.set_timesteps(num_inference_steps=4, device="cuda")
     
     # Test with batch_size=2
     model_output_2 = torch.randn(2, 16, 24, 90, 160, device="cuda", dtype=torch.bfloat16)
@@ -55,7 +55,7 @@ def test_batch_scheduler_step():
     scheduler = FlowUniPCMultistepScheduler(
         num_train_timesteps=1000, shift=1, use_dynamic_shifting=False
     )
-    scheduler.set_timesteps(num_steps=4, device="cuda")
+    scheduler.set_timesteps(num_inference_steps=4, device="cuda")
     
     model_output_4 = torch.randn(4, 16, 24, 90, 160, device="cuda", dtype=torch.bfloat16)
     sample_4 = torch.randn(4, 16, 24, 90, 160, device="cuda", dtype=torch.bfloat16)
