@@ -139,6 +139,158 @@ class Control2WorldInference:
             log.info("=" * 50)
         return output_paths
 
+    def generate_batch(
+        self,
+        samples: list[InferenceArguments],
+        output_dir: Path,
+        batch_size: int = 2,
+    ) -> list[str]:
+        """
+        Process samples in GPU-parallel batches for improved throughput.
+
+        Unlike generate() which processes samples sequentially, this method
+        batches multiple samples together and processes them in parallel on the GPU.
+
+        Requirements:
+        - All samples in a batch must have the same resolution
+        - All samples must have the same number of frames
+        - All samples must use the same hint_keys (control types)
+
+        Args:
+            samples: List of InferenceArguments to process
+            output_dir: Directory to save outputs
+            batch_size: Number of samples to process in parallel (default: 2)
+
+        Returns:
+            List of output file paths
+        """
+        if SMOKE:
+            samples = samples[:1]
+            batch_size = 1
+
+        sample_names = [sample.name for sample in samples]
+        log.info(f"Batch generating {len(samples)} samples with batch_size={batch_size}: {sample_names}")
+
+        output_paths: list[str] = []
+
+        # Process in batches
+        for batch_start in range(0, len(samples), batch_size):
+            batch_end = min(batch_start + batch_size, len(samples))
+            batch_samples = samples[batch_start:batch_end]
+
+            log.info(f"Processing batch {batch_start // batch_size + 1}: samples {batch_start + 1}-{batch_end}")
+
+            batch_outputs = self._generate_batch(batch_samples, output_dir, batch_start)
+            output_paths.extend([p for p in batch_outputs if p is not None])
+
+        if is_rank0() and self.setup_args.benchmark:
+            log.info("=" * 50)
+            log.info("BATCH BENCHMARK RESULTS")
+            log.info("=" * 50)
+            for key, value in self.benchmark_timer.results.items():
+                log.info(f"{key}: {value} seconds")
+            log.info("=" * 50)
+
+        return output_paths
+
+    def _generate_batch(
+        self,
+        batch_samples: list[InferenceArguments],
+        output_dir: Path,
+        batch_offset: int = 0,
+    ) -> list[str | None]:
+        """
+        Generate videos for a batch of samples in parallel.
+
+        Args:
+            batch_samples: List of samples to process together
+            output_dir: Output directory
+            batch_offset: Offset for sample IDs (for benchmark timing)
+
+        Returns:
+            List of output paths (or None for failed samples)
+        """
+        if not batch_samples:
+            return []
+
+        batch_size = len(batch_samples)
+        log.info(f"Running batch inference for {batch_size} samples")
+
+        # Validate batch compatibility
+        first_sample = batch_samples[0]
+        for sample in batch_samples[1:]:
+            if sample.resolution != first_sample.resolution:
+                raise ValueError(f"All samples must have same resolution. Got {sample.resolution} vs {first_sample.resolution}")
+            if sample.max_frames != first_sample.max_frames:
+                raise ValueError(f"All samples must have same max_frames. Got {sample.max_frames} vs {first_sample.max_frames}")
+            if set(sample.hint_keys) != set(first_sample.hint_keys):
+                raise ValueError(f"All samples must have same hint_keys. Got {sample.hint_keys} vs {first_sample.hint_keys}")
+
+        # Run text guardrails for all samples first
+        if self.device_rank == 0:
+            for sample in batch_samples:
+                output_dir.mkdir(parents=True, exist_ok=True)
+                output_path = output_dir / sample.name
+                open(f"{output_path}.json", "w").write(sample.model_dump_json())
+
+                if self.text_guardrail_runner is not None:
+                    if not guardrail_presets.run_text_guardrail(sample.prompt, self.text_guardrail_runner):
+                        log.critical(f"Guardrail blocked prompt for {sample.name}")
+                        if not self.setup_args.keep_going:
+                            raise Exception(f"Guardrail blocked: {sample.prompt}")
+
+        # Build control weights (same for all samples in batch for now)
+        control_weight = ""
+        for key in self.batch_hint_keys:
+            control_weight += first_sample.control_weight_dict.get(key, "0.0") + ","
+        control_weight = control_weight[:-1]
+
+        # Run batched inference through the pipeline
+        with self.benchmark_timer("generate_img2world_batch"):
+            output_videos, control_video_dicts, fps_list = self.inference_pipeline.generate_img2world_batch(
+                video_paths=[path_to_str(s.video_path) for s in batch_samples],
+                prompts=[s.prompt for s in batch_samples],
+                negative_prompts=[s.negative_prompt for s in batch_samples],
+                guidance=first_sample.guidance,  # Same for batch
+                seeds=[s.seed for s in batch_samples],
+                resolution=first_sample.resolution,
+                control_weight=control_weight,
+                hint_key=first_sample.hint_keys,
+                input_control_video_paths_list=[s.control_modalities for s in batch_samples],
+                num_steps=first_sample.num_steps,
+                max_frames=first_sample.max_frames,
+            )
+
+        # Save outputs
+        output_paths: list[str | None] = []
+        for i, (sample, output_video, control_video_dict, fps) in enumerate(
+            zip(batch_samples, output_videos, control_video_dicts, fps_list)
+        ):
+            output_path = output_dir / sample.name
+            ext = "mp4" if output_video.shape[1] > 1 else "jpg"  # Check temporal dim
+
+            if self.device_rank == 0:
+                # Normalize and save
+                output_video_norm = (1.0 + output_video) / 2
+                save_img_or_video(output_video_norm, str(output_path), fps=fps)
+
+                # Save control videos
+                for key in control_video_dict:
+                    control_norm = (1.0 + control_video_dict[key]) / 2
+                    save_img_or_video(control_norm, f"{output_path}_control_{key}", fps=fps)
+
+                # Save prompt
+                with open(f"{output_path}.txt", "w") as f:
+                    f.write(sample.prompt)
+
+                log.success(f"Generated video saved to {output_path}.{ext}")
+                output_paths.append(f"{output_path}.{ext}")
+            else:
+                output_paths.append(None)
+
+        torch.cuda.empty_cache()
+        return output_paths
+
     def _generate_sample(self, sample: InferenceArguments, output_dir: Path, sample_id: int = 0) -> str | None:
         log.debug(f"{sample.__class__.__name__}({sample})")
         output_path = output_dir / sample.name

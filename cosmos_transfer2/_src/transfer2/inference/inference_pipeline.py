@@ -647,3 +647,203 @@ class ControlVideo2WorldInference:
                         )
         log.info(f"Average time per chunk: {sum(time_per_chunk) / len(time_per_chunk)}")
         return full_video, control_video_dict, mask_video_dict, fps, original_hw
+
+    @torch.no_grad()
+    def generate_img2world_batch(
+        self,
+        video_paths: list[str],
+        prompts: list[str],
+        negative_prompts: list[str],
+        guidance: int = 7,
+        seeds: list[int] = None,
+        resolution: str = "720",
+        control_weight: str = "1.0",
+        hint_key: list[str] = ["edge"],
+        input_control_video_paths_list: list[dict[str, str]] = None,
+        num_steps: int = 35,
+        max_frames: int = 93,
+    ) -> tuple[list[torch.Tensor], list[dict[str, torch.Tensor]], list[int]]:
+        """
+        Generate videos for multiple inputs in a single batched forward pass.
+
+        This method processes multiple samples in parallel on the GPU for improved
+        throughput compared to sequential processing.
+
+        Args:
+            video_paths: List of paths to input videos
+            prompts: List of text prompts (one per video)
+            negative_prompts: List of negative prompts
+            guidance: Guidance scale (same for all samples)
+            seeds: List of random seeds (one per video)
+            resolution: Resolution string (same for all)
+            control_weight: Control weight string (same for all)
+            hint_key: List of control types (same for all)
+            input_control_video_paths_list: List of control path dicts (one per video)
+            num_steps: Number of diffusion steps
+            max_frames: Maximum frames to process
+
+        Returns:
+            Tuple of:
+            - List of output video tensors (C, T, H, W) per sample
+            - List of control video dicts per sample
+            - List of FPS values per sample
+        """
+        batch_size = len(video_paths)
+        if seeds is None:
+            seeds = [1] * batch_size
+        if input_control_video_paths_list is None:
+            input_control_video_paths_list = [None] * batch_size
+
+        log.info(f"Batch inference for {batch_size} videos")
+
+        # 1. Load and preprocess all videos
+        all_input_frames = []
+        all_fps = []
+        all_original_hw = []
+        aspect_ratio = None
+
+        for video_path in video_paths:
+            input_frames, fps, ar, original_hw = read_and_process_video(
+                video_path, resolution=resolution, max_frames=max_frames
+            )
+            if input_frames.shape[1] == 0:
+                raise ValueError(f"Input video is empty: {video_path}")
+            all_input_frames.append(input_frames)
+            all_fps.append(fps)
+            all_original_hw.append(original_hw)
+            if aspect_ratio is None:
+                aspect_ratio = ar
+            elif ar != aspect_ratio:
+                raise ValueError(f"All videos must have same aspect ratio. Got {ar} vs {aspect_ratio}")
+
+        # 2. Compute text embeddings for all prompts
+        log.info("Computing text embeddings for batch...")
+        all_text_embeddings = []
+        for prompt in prompts:
+            if self.text_encoder_class == "T5":
+                text_emb = get_t5_from_prompt(prompt, text_encoder_class="T5", cache_dir=self.cache_dir)
+            else:
+                text_emb = self.model.text_encoder.compute_text_embeddings_online(
+                    {"ai_caption": [prompt], "images": None}, input_caption_key="ai_caption"
+                )
+            all_text_embeddings.append(text_emb)
+
+        # Compute negative prompt embedding once (same for all)
+        if negative_prompts[0]:
+            if self.text_encoder_class == "T5":
+                neg_text_emb = get_t5_from_prompt(negative_prompts[0], text_encoder_class="T5", cache_dir=self.cache_dir)
+            else:
+                neg_text_emb = self.model.text_encoder.compute_text_embeddings_online(
+                    {"ai_caption": [negative_prompts[0]], "images": None}, input_caption_key="ai_caption"
+                )
+            self.neg_t5_embeddings = neg_text_emb
+
+        # 3. Load control inputs for all videos
+        log.info("Loading control inputs for batch...")
+        all_control_inputs = []
+        all_mask_videos = []
+        for i, (video_path, control_paths) in enumerate(zip(video_paths, input_control_video_paths_list)):
+            control_input_dict, mask_video_dict = read_and_process_control_input(
+                video_path=video_path,
+                input_control_paths=control_paths,
+                hint_key=hint_key,
+                resolution=resolution,
+            )
+            all_control_inputs.append(control_input_dict)
+            all_mask_videos.append(mask_video_dict)
+
+        # 4. Prepare batched tensors
+        log.info("Preparing batched data...")
+
+        # Stack input frames: (B, C, T, H, W)
+        input_frames_batch = torch.stack(all_input_frames, dim=0)
+        B, C, T, H, W = input_frames_batch.shape
+
+        # For first chunk, use zeros as prev_output
+        prev_output_batch = torch.zeros(B, 3, T, H, W, dtype=torch.uint8, device="cuda")
+
+        # Stack text embeddings
+        text_embedding_batch = torch.cat(all_text_embeddings, dim=0)
+
+        # 5. Build batched data_batch
+        self.batch_size = batch_size
+        input_key = "video" if T > 1 else "images"
+
+        # Normalize input frames
+        input_video_batch = uint8_to_normalized_float(input_frames_batch, dtype=torch.bfloat16).cuda()
+        prev_output_norm = uint8_to_normalized_float(prev_output_batch, dtype=torch.bfloat16).cuda()
+
+        data_batch = {
+            "dataset_name": "video_data",
+            input_key: prev_output_norm.squeeze(2) if T == 1 else prev_output_norm,
+            "t5_text_embeddings": text_embedding_batch.to(dtype=torch.bfloat16, device="cuda"),
+            "fps": torch.randint(16, 32, (batch_size,)).cuda(),
+            "padding_mask": torch.zeros(batch_size, 1, H, W, device="cuda"),
+            "num_conditional_frames": 0,  # First chunk
+            "control_weight": [float(w) for w in control_weight.split(",")],
+            "input_video": input_video_batch,
+        }
+
+        # Add negative prompt embeddings
+        if negative_prompts[0]:
+            neg_emb = self.neg_t5_embeddings
+            if neg_emb.shape[0] == 1:
+                neg_emb = neg_emb.repeat(batch_size, 1, 1)
+            data_batch["neg_t5_text_embeddings"] = neg_emb.to(dtype=torch.bfloat16, device="cuda")
+
+        # Stack and add control inputs
+        for key in hint_key:
+            control_key = f"control_input_{key}"
+            control_batch = torch.stack([
+                all_control_inputs[i].get(control_key, torch.zeros(C, T, H, W))
+                for i in range(batch_size)
+            ], dim=0)
+            data_batch[control_key] = control_batch.to(dtype=torch.bfloat16, device="cuda")
+
+        # Apply augmentor for edge/blur if needed
+        data_batch = get_augmentor_for_eval(
+            data_dict=data_batch,
+            input_keys=["input_video"],
+            output_keys=hint_key,
+        )
+
+        # 6. Run batched inference
+        log.info(f"Running batched diffusion ({num_steps} steps, batch_size={batch_size})...")
+        self.model.eval()
+
+        # Use first seed for generator (could be improved to handle per-sample seeds)
+        seed = seeds[0]
+        random.seed(seed)
+
+        sample = self.model.generate_samples_from_batch(
+            data_batch,
+            n_sample=None,  # Auto-detect from data_batch
+            guidance=guidance,
+            seed=seed,
+            is_negative_prompt=negative_prompts[0] is not None,
+            num_steps=num_steps,
+        )
+
+        # Decode batched latents to videos
+        log.info("Decoding batch...")
+        videos = self.model.decode(sample)  # (B, C, T, H, W)
+
+        # 7. Split outputs back to individual samples
+        output_videos = []
+        output_control_dicts = []
+
+        for i in range(batch_size):
+            # Extract single video (C, T, H, W)
+            video = videos[i]
+            output_videos.append(video.cpu())
+
+            # Extract control videos for this sample
+            control_dict = {}
+            for key in hint_key:
+                control_key = f"control_input_{key}"
+                if control_key in data_batch:
+                    control_dict[key] = data_batch[control_key][i].cpu()
+            output_control_dicts.append(control_dict)
+
+        log.info(f"Batch inference complete for {batch_size} videos")
+        return output_videos, output_control_dicts, all_fps
