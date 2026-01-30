@@ -73,7 +73,7 @@ def test_batch_inference_real(
         disable_guardrails=True,  # Skip for testing
     )
     
-    # Create sample configs
+    # Create sample configs - depth control is implicit via model="depth"
     sample1 = InferenceArguments(
         name="batch_sample_1",
         video_path=video1,
@@ -81,7 +81,6 @@ def test_batch_inference_real(
         guidance=guidance,
         num_steps=num_steps,
         seed=42,
-        hint_keys=["depth", "edge"],
     )
     
     sample2 = InferenceArguments(
@@ -91,12 +90,12 @@ def test_batch_inference_real(
         guidance=guidance,
         num_steps=num_steps,
         seed=142,  # Different seed
-        hint_keys=["depth", "edge"],
     )
     
     # Initialize inference
     print("\nInitializing model (this may take a while)...")
-    batch_hint_keys = list(set(sample1.hint_keys + sample2.hint_keys))
+    # For depth model, the hint key is just "depth"
+    batch_hint_keys = ["depth"]
     
     start_init = time.time()
     inference = Control2WorldInference(setup_args, batch_hint_keys=batch_hint_keys)
