@@ -795,22 +795,32 @@ class ControlVideo2WorldInference:
         # Stack and add control inputs
         # Control inputs from read_and_process_control_input have shape (C, T, H, W) - no batch dim
         # Use stack to add batch dimension
+        loaded_control_keys = set()
         for key in hint_key:
             control_key = f"control_input_{key}"
             control_list = [
-                all_control_inputs[i].get(control_key, torch.zeros(C, T, H, W))
+                all_control_inputs[i].get(control_key)
                 for i in range(batch_size)
             ]
-            # Stack along new dim=0 to get (B, C, T, H, W)
-            control_batch = torch.stack(control_list, dim=0)
-            data_batch[control_key] = control_batch.to(dtype=torch.bfloat16, device="cuda")
+            # Only stack if all samples have the control input
+            if all(c is not None for c in control_list):
+                # Stack along new dim=0 to get (B, C, T, H, W)
+                control_batch = torch.stack(control_list, dim=0)
+                data_batch[control_key] = control_batch.to(dtype=torch.bfloat16, device="cuda")
+                loaded_control_keys.add(key)
+                # Add mask for this control
+                mask_key = f"{control_key}_mask"
+                if mask_key not in data_batch:
+                    data_batch[mask_key] = torch.ones(B, 1, T, H, W, dtype=torch.bool, device="cuda")
 
-        # Apply augmentor for edge/blur if needed
-        data_batch = get_augmentor_for_eval(
-            data_dict=data_batch,
-            input_keys=["input_video"],
-            output_keys=hint_key,
-        )
+        # Apply augmentor ONLY for control types that weren't pre-loaded
+        # get_augmentor_for_eval adds unsqueeze(0) which is wrong for batched data
+        missing_keys = [k for k in hint_key if k not in loaded_control_keys]
+        if missing_keys:
+            # For edge/vis that need on-the-fly computation, we'd need batched augmentor
+            # For now, log warning - we expect all control inputs to be pre-loaded
+            log.warning(f"Missing control inputs for batch inference: {missing_keys}. "
+                       "On-the-fly computation not supported for batch mode.")
 
         # 6. Run batched inference
         log.info(f"Running batched diffusion ({num_steps} steps, batch_size={batch_size})...")
