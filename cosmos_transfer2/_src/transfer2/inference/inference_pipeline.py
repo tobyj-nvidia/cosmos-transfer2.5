@@ -769,13 +769,14 @@ class ControlVideo2WorldInference:
         self.batch_size = batch_size
         input_key = "video" if T > 1 else "images"
 
-        # Normalize input frames
+        # Normalize input frames for "input_video" key
         input_video_batch = uint8_to_normalized_float(input_frames_batch, dtype=torch.bfloat16).cuda()
-        prev_output_norm = uint8_to_normalized_float(prev_output_batch, dtype=torch.bfloat16).cuda()
+        
+        # Note: data_batch[input_key] must be uint8 - model normalizes internally in _normalize_video_databatch_inplace
 
         data_batch = {
             "dataset_name": "video_data",
-            input_key: prev_output_norm.squeeze(2) if T == 1 else prev_output_norm,
+            input_key: prev_output_batch.squeeze(2) if T == 1 else prev_output_batch,  # Keep uint8!
             "t5_text_embeddings": text_embedding_batch.to(dtype=torch.bfloat16, device="cuda"),
             "fps": torch.randint(16, 32, (batch_size,)).cuda(),
             "padding_mask": torch.zeros(batch_size, 1, H, W, device="cuda"),
