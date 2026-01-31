@@ -810,7 +810,7 @@ class MinimalV4LVGControlVaceDiT(MiniTrainDITImageContext):
                 padding_mask, list(x_B_C_T_H_W.shape[-2:]), interpolation=transforms.InterpolationMode.NEAREST
             )
             x_B_C_T_H_W = torch.cat(
-                [x_B_C_T_H_W, padding_mask.unsqueeze(1).repeat(1, 1, x_B_C_T_H_W.shape[2], 1, 1)], dim=1
+                [x_B_C_T_H_W, padding_mask.unsqueeze(1).repeat(1, 1, x_B_C_T_H_W.shape[2], 1, 1).type_as(x_B_C_T_H_W)], dim=1
             )
         x_B_T_H_W_D = embedder(x_B_C_T_H_W)
 
