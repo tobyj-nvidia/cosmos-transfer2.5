@@ -305,6 +305,7 @@ class ControlVideo2WorldModelRectifiedFlow(Video2WorldModelRectifiedFlow):
         rank = get_rank()
 
         def velocity_fn(noise: torch.Tensor, noise_x: torch.Tensor, timestep: torch.Tensor) -> torch.Tensor:
+            noise = noise.to(**self.tensor_kwargs)
             noise_x = noise_x.to(**self.tensor_kwargs)
             """
             Use CFG parallel with 2 independent CP groups, each performing one denoising step.
