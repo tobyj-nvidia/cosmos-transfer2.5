@@ -168,6 +168,23 @@ class ControlVideo2WorldModelRectifiedFlow(Video2WorldModelRectifiedFlow):
         control_weight_maps = control_weight_maps * scale_factors[None]  # [num_modalities, B, T, H, W, 1]
         return control_weight_maps
 
+    def _encode_batched(self, inputs: Tensor) -> Tensor:
+        """Encode batched inputs by processing each sample separately.
+        
+        The tokenizer/VAE encoder doesn't support batched inputs natively,
+        so we need to loop over the batch dimension.
+        """
+        batch_size = inputs.shape[0]
+        if batch_size == 1:
+            return self.encode(inputs)
+        
+        # Process each sample separately and concatenate
+        encoded_list = []
+        for i in range(batch_size):
+            single_encoded = self.encode(inputs[i:i+1])
+            encoded_list.append(single_encoded)
+        return torch.cat(encoded_list, dim=0)
+
     def get_control_latent(self, latent_state: Tensor, control_input: Tensor, control_input_mask: Tensor) -> Tensor:
         latent_control_input = []
         if control_input is not None and not (control_input == -1).all():
@@ -178,7 +195,8 @@ class ControlVideo2WorldModelRectifiedFlow(Video2WorldModelRectifiedFlow):
                     f"control_input_mask.shape[1] != 1: {control_input_mask.shape[1]}"
                 )
                 fg = (control_input + 1) / 2 * control_input_mask * 2 - 1
-                latent_control_input.append(self.encode(fg).contiguous().to(**self.tensor_kwargs))
+                # Use batched encoding for control inputs
+                latent_control_input.append(self._encode_batched(fg).contiguous().to(**self.tensor_kwargs))
 
                 # reshape 8x8 spatial patch to channel dimension
                 ph = pw = self.tokenizer.spatial_compression_factor
@@ -197,7 +215,8 @@ class ControlVideo2WorldModelRectifiedFlow(Video2WorldModelRectifiedFlow):
                     mask = torch.cat(mask, dim=2)
                 latent_control_input.append(mask.contiguous().to(**self.tensor_kwargs))
             else:
-                latent_control_input.append(self.encode(control_input).contiguous().to(**self.tensor_kwargs))
+                # Use batched encoding for control inputs
+                latent_control_input.append(self._encode_batched(control_input).contiguous().to(**self.tensor_kwargs))
         else:
             if self.net.vace_has_mask:
                 ch = latent_state.shape[1] + self.tokenizer.spatial_compression_factor**2
