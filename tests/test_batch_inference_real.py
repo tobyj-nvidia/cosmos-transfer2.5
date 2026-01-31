@@ -74,6 +74,8 @@ def test_batch_inference_real(
     )
     
     # Create sample configs with explicit depth control
+    # Since our input videos ARE depth videos, provide them as control_path
+    # to skip VideoDepthAnything computation (which has CUDA kernel issues)
     sample1 = InferenceArguments(
         name="batch_sample_1",
         video_path=video1,
@@ -81,7 +83,7 @@ def test_batch_inference_real(
         guidance=guidance,
         num_steps=num_steps,
         seed=42,
-        depth=DepthConfig(),  # Enable depth control (will use video_path as input)
+        depth=DepthConfig(control_path=video1),  # Use depth video directly
     )
     
     sample2 = InferenceArguments(
@@ -91,7 +93,7 @@ def test_batch_inference_real(
         guidance=guidance,
         num_steps=num_steps,
         seed=142,  # Different seed
-        depth=DepthConfig(),  # Enable depth control
+        depth=DepthConfig(control_path=video2),  # Use depth video directly
     )
     
     # Initialize inference
