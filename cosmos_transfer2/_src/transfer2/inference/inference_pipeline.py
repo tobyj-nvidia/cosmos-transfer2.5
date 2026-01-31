@@ -793,12 +793,16 @@ class ControlVideo2WorldInference:
             data_batch["neg_t5_text_embeddings"] = neg_emb.to(dtype=torch.bfloat16, device="cuda")
 
         # Stack and add control inputs
+        # Control inputs from read_and_process_control_input have shape (1, C, T, H, W)
+        # Use cat to concatenate along batch dimension, or squeeze then stack
         for key in hint_key:
             control_key = f"control_input_{key}"
-            control_batch = torch.stack([
-                all_control_inputs[i].get(control_key, torch.zeros(C, T, H, W))
+            control_list = [
+                all_control_inputs[i].get(control_key, torch.zeros(1, C, T, H, W))
                 for i in range(batch_size)
-            ], dim=0)
+            ]
+            # Concatenate along batch dimension (each input has shape [1, C, T, H, W])
+            control_batch = torch.cat(control_list, dim=0)  # Result: [B, C, T, H, W]
             data_batch[control_key] = control_batch.to(dtype=torch.bfloat16, device="cuda")
 
         # Apply augmentor for edge/blur if needed
