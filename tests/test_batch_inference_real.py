@@ -59,7 +59,7 @@ def test_batch_inference_real(
     
     # Import cosmos modules
     print("Loading Cosmos modules...")
-    from cosmos_transfer2.config import InferenceArguments, SetupArguments, ModelKey, MODEL_CHECKPOINTS
+    from cosmos_transfer2.config import InferenceArguments, SetupArguments, ModelKey, MODEL_CHECKPOINTS, DepthConfig
     from cosmos_transfer2.inference import Control2WorldInference
     
     # Create output directory
@@ -73,7 +73,7 @@ def test_batch_inference_real(
         disable_guardrails=True,  # Skip for testing
     )
     
-    # Create sample configs - depth control is implicit via model="depth"
+    # Create sample configs with explicit depth control
     sample1 = InferenceArguments(
         name="batch_sample_1",
         video_path=video1,
@@ -81,6 +81,7 @@ def test_batch_inference_real(
         guidance=guidance,
         num_steps=num_steps,
         seed=42,
+        depth=DepthConfig(),  # Enable depth control (will use video_path as input)
     )
     
     sample2 = InferenceArguments(
@@ -90,6 +91,7 @@ def test_batch_inference_real(
         guidance=guidance,
         num_steps=num_steps,
         seed=142,  # Different seed
+        depth=DepthConfig(),  # Enable depth control
     )
     
     # Initialize inference
