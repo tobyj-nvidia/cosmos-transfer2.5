@@ -210,9 +210,9 @@ class ControlVideo2WorldInference:
             "dataset_name": "video_data",
             input_key: prev_output.squeeze(2),
             "t5_text_embeddings": text_embedding,  # positive prompt embedding. Name has t5 but also supports Reason1.
-            "fps": torch.randint(16, 32, (self.batch_size,)).cuda(),  # Random FPS (might be used by model)
+            "fps": torch.randint(16, 32, (B,)).cuda(),  # Random FPS (might be used by model)
             "padding_mask": torch.zeros(
-                self.batch_size, 1, H, W, device="cuda"
+                B, 1, H, W, device="cuda"
             ),  # Padding mask (assumed no padding here)
             "num_conditional_frames": 1,  # Specify that the first frame is conditional
             "control_weight": [float(w) for w in control_weight.split(",")],
