@@ -181,8 +181,26 @@ def test_batch_inference_real(
     prompt: str = "A robotic arm manipulating objects on a table in an industrial setting.",
     num_steps: int = 4,
     guidance: int = 7,
+    state_t: int = 24,
 ):
-    """Run batch inference with 2 real videos and GPU monitoring."""
+    """
+    Run batch inference with 2 real videos and GPU monitoring.
+    
+    Args:
+        video1_path: Path to first depth control video
+        video2_path: Path to second depth control video
+        output_dir: Output directory for results
+        prompt: Text prompt for generation
+        num_steps: Number of diffusion steps
+        guidance: Guidance scale
+        state_t: Latent temporal frames. Controls video length:
+                 - state_t=2 → 5 pixel frames
+                 - state_t=4 → 13 pixel frames
+                 - state_t=7 → 25 pixel frames
+                 - state_t=24 → 93 pixel frames (default)
+    """
+    # Calculate expected pixel frames from state_t
+    expected_pixel_frames = (state_t - 1) * 4 + 1
     
     print("=" * 60)
     print("Cosmos Batch Inference - Real Model Test (with GPU Monitoring)")
@@ -204,6 +222,7 @@ def test_batch_inference_real(
     print(f"Output dir: {output_dir}")
     print(f"Prompt: {prompt}")
     print(f"Steps: {num_steps}, Guidance: {guidance}")
+    print(f"State_t: {state_t} (expecting {expected_pixel_frames} pixel frames)")
     print()
     
     # Import cosmos modules
@@ -248,9 +267,13 @@ def test_batch_inference_real(
     batch_hint_keys = ["depth"]
     
     start_init = time.time()
-    inference = Control2WorldInference(setup_args, batch_hint_keys=batch_hint_keys)
+    inference = Control2WorldInference(
+        setup_args, 
+        batch_hint_keys=batch_hint_keys,
+        state_t=state_t,
+    )
     init_time = time.time() - start_init
-    print(f"Model loaded in {init_time:.1f}s")
+    print(f"Model loaded in {init_time:.1f}s (state_t={state_t})")
     
     # ========== BATCH INFERENCE ==========
     print("\n" + "=" * 60)
@@ -363,6 +386,8 @@ if __name__ == "__main__":
     parser.add_argument("--prompt", default="A robotic arm manipulating objects on a table.", help="Prompt")
     parser.add_argument("--num-steps", type=int, default=4, help="Diffusion steps")
     parser.add_argument("--guidance", type=int, default=7, help="Guidance scale")
+    parser.add_argument("--state-t", type=int, default=24, 
+                        help="Latent temporal frames (2=5 pixel, 4=13 pixel, 7=25 pixel, 24=93 pixel)")
     
     args = parser.parse_args()
     
@@ -373,6 +398,7 @@ if __name__ == "__main__":
         prompt=args.prompt,
         num_steps=args.num_steps,
         guidance=args.guidance,
+        state_t=args.state_t,
     )
     
     sys.exit(0 if success else 1)

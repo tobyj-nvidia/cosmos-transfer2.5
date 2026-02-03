@@ -37,14 +37,33 @@ from cosmos_transfer2.config import (
 
 
 class Control2WorldInference:
+    # Default state_t value (24 latent frames = 93 pixel frames)
+    DEFAULT_STATE_T = 24
+    
     def __init__(
         self,
         args: SetupArguments,
         batch_hint_keys: list[str],
+        state_t: int = DEFAULT_STATE_T,
     ) -> None:
+        """
+        Initialize Control2World inference.
+        
+        Args:
+            args: Setup arguments for inference
+            batch_hint_keys: List of control types (e.g., ["depth"])
+            state_t: Number of latent temporal frames. Controls video length:
+                     - state_t=2 → 5 pixel frames
+                     - state_t=4 → 13 pixel frames  
+                     - state_t=7 → 25 pixel frames
+                     - state_t=24 → 93 pixel frames (default)
+                     Formula: pixel_frames = (state_t - 1) * 4 + 1
+        """
         log.debug(f"{args.__class__.__name__}({args})({batch_hint_keys})")
         self.setup_args = args
         self.batch_hint_keys = batch_hint_keys
+        self.state_t = state_t
+        
         if len(self.batch_hint_keys) == 1:
             # pyrefly: ignore  # bad-argument-type
             checkpoint = MODEL_CHECKPOINTS[ModelKey(variant=self.batch_hint_keys[0])]
@@ -85,12 +104,19 @@ class Control2WorldInference:
             self.video_guardrail_runner = None
 
         self.benchmark_timer = misc.TrainingTimer()
+        
+        # Build experiment override options, including state_t if non-default
+        exp_override_opts = list(EXPERIMENTS[self.experiment].command_args)  # Copy to avoid mutation
+        if state_t != self.DEFAULT_STATE_T:
+            exp_override_opts.append(f"model.config.state_t={state_t}")
+            log.info(f"Overriding state_t to {state_t} (pixel frames: {(state_t - 1) * 4 + 1})")
+        
         # Initialize the inference class
         self.inference_pipeline = ControlVideo2WorldInference(
             registered_exp_name=EXPERIMENTS[self.experiment].registered_exp_name,
             checkpoint_paths=self.checkpoint_list,
             s3_credential_path="",
-            exp_override_opts=EXPERIMENTS[self.experiment].command_args,
+            exp_override_opts=exp_override_opts,
             process_group=process_group,
             use_cp_wan=args.enable_parallel_tokenizer,
             wan_cp_grid=args.parallel_tokenizer_grid,
