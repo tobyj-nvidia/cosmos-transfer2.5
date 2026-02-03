@@ -406,6 +406,7 @@ class ControlVideo2WorldInference:
         """
         # --------Input processing--------
         # Process input video and get meta info.
+        torch.cuda.nvtx.range_push("LOAD_INPUT_VIDEO")
         log.info("Loading input video...")
         # aspect_ratio is width / height
         # input_frames is (C, T, H, W)
@@ -414,8 +415,10 @@ class ControlVideo2WorldInference:
         )
         if input_frames.shape[1] == 0:
             raise ValueError("Input video is empty")
+        torch.cuda.nvtx.range_pop()
 
         # Get text context embeddings
+        torch.cuda.nvtx.range_push("TEXT_EMBEDDINGS")
         log.info("Computing prompt text embeddings...")
         with _maybe_get_timer(self.benchmark_timer, "get_text_embeddings"):
             if self.text_encoder_class == "T5":
@@ -435,8 +438,10 @@ class ControlVideo2WorldInference:
                         {"ai_caption": [negative_prompt], "images": None}, input_caption_key="ai_caption"
                     )
                 self.neg_t5_embeddings = neg_text_embeddings
+        torch.cuda.nvtx.range_pop()
 
         # Process image context if provided; else will be None
+        torch.cuda.nvtx.range_push("PREPROCESSING")
         log.info("Processing image context if available...")
         with _maybe_get_timer(self.benchmark_timer, "preprocessing"):
             if context_frame_idx is not None:
@@ -457,6 +462,7 @@ class ControlVideo2WorldInference:
                 resolution=resolution,
                 seg_control_prompt=seg_control_prompt,
             )
+        torch.cuda.nvtx.range_pop()
 
             # -------- Stuff to handle chunk-wise long video generation --------
             num_total_frames, num_chunks, num_frames_per_chunk = self._get_num_chunks(
@@ -543,6 +549,7 @@ class ControlVideo2WorldInference:
 
                 # Generate and decode video
                 # n_sample=None lets the model auto-detect batch size from data_batch
+                torch.cuda.nvtx.range_push("DIFFUSION_MODEL")
                 if distillation == "dmd2":
                     log.info("Generating samples using DMD2 distillation...")
                     sample = self.model.generate_samples_from_batch_dmd2(
@@ -563,7 +570,10 @@ class ControlVideo2WorldInference:
                         sigma_max=sigma_max,
                         num_steps=num_steps,
                     )
+                torch.cuda.nvtx.range_pop()
+                torch.cuda.nvtx.range_push("VAE_DECODE")
                 video = self.model.decode(sample)  # Shape: (B, C, T, H, W)
+                torch.cuda.nvtx.range_pop()
 
                 # For visualization: concatenate condition and input videos with generated video
                 video_cat = video
@@ -620,6 +630,7 @@ class ControlVideo2WorldInference:
                 end_time = time.perf_counter()
                 time_per_chunk.append(end_time - start_time)
 
+        torch.cuda.nvtx.range_push("POSTPROCESSING")
         with _maybe_get_timer(self.benchmark_timer, "postprocessing"):
             # Concatenate all chunks along time
             full_video = torch.cat(all_chunks, dim=2)  # (1, C, T, H, W)
@@ -645,6 +656,7 @@ class ControlVideo2WorldInference:
                         control_video_dict[key] = reshape_output_video_to_input_resolution(
                             control_video_dict[key], [key], False, False, original_hw
                         )
+        torch.cuda.nvtx.range_pop()
         log.info(f"Average time per chunk: {sum(time_per_chunk) / len(time_per_chunk)}")
         return full_video, control_video_dict, mask_video_dict, fps, original_hw
 
@@ -697,6 +709,7 @@ class ControlVideo2WorldInference:
         log.info(f"Batch inference for {batch_size} videos")
 
         # 1. Load and preprocess all videos
+        torch.cuda.nvtx.range_push("LOAD_INPUT_VIDEOS")
         all_input_frames = []
         all_fps = []
         all_original_hw = []
@@ -715,8 +728,10 @@ class ControlVideo2WorldInference:
                 aspect_ratio = ar
             elif ar != aspect_ratio:
                 raise ValueError(f"All videos must have same aspect ratio. Got {ar} vs {aspect_ratio}")
+        torch.cuda.nvtx.range_pop()
 
         # 2. Compute text embeddings for all prompts
+        torch.cuda.nvtx.range_push("TEXT_EMBEDDINGS")
         log.info("Computing text embeddings for batch...")
         all_text_embeddings = []
         for prompt in prompts:
@@ -737,8 +752,10 @@ class ControlVideo2WorldInference:
                     {"ai_caption": [negative_prompts[0]], "images": None}, input_caption_key="ai_caption"
                 )
             self.neg_t5_embeddings = neg_text_emb
+        torch.cuda.nvtx.range_pop()
 
         # 3. Load control inputs for all videos
+        torch.cuda.nvtx.range_push("LOAD_CONTROL_INPUTS")
         log.info("Loading control inputs for batch...")
         all_control_inputs = []
         all_mask_videos = []
@@ -751,8 +768,10 @@ class ControlVideo2WorldInference:
             )
             all_control_inputs.append(control_input_dict)
             all_mask_videos.append(mask_video_dict)
+        torch.cuda.nvtx.range_pop()
 
         # 4. Prepare batched tensors
+        torch.cuda.nvtx.range_push("BATCH_DATA_PREP")
         log.info("Preparing batched data...")
 
         # Stack input frames: (B, C, T, H, W)
@@ -823,8 +842,10 @@ class ControlVideo2WorldInference:
             # For now, log warning - we expect all control inputs to be pre-loaded
             log.warning(f"Missing control inputs for batch inference: {missing_keys}. "
                        "On-the-fly computation not supported for batch mode.")
+        torch.cuda.nvtx.range_pop()
 
         # 6. Run batched inference
+        torch.cuda.nvtx.range_push("DIFFUSION_MODEL")
         log.info(f"Running batched diffusion ({num_steps} steps, batch_size={batch_size})...")
         self.model.eval()
 
@@ -840,12 +861,16 @@ class ControlVideo2WorldInference:
             is_negative_prompt=negative_prompts[0] is not None,
             num_steps=num_steps,
         )
+        torch.cuda.nvtx.range_pop()
 
         # Decode batched latents to videos
+        torch.cuda.nvtx.range_push("VAE_DECODE_BATCH")
         log.info("Decoding batch...")
         videos = self.model.decode(sample)  # (B, C, T, H, W)
+        torch.cuda.nvtx.range_pop()
 
         # 7. Split outputs back to individual samples
+        torch.cuda.nvtx.range_push("SPLIT_OUTPUTS")
         output_videos = []
         output_control_dicts = []
 
@@ -861,6 +886,7 @@ class ControlVideo2WorldInference:
                 if control_key in data_batch:
                     control_dict[key] = data_batch[control_key][i].cpu()
             output_control_dicts.append(control_dict)
+        torch.cuda.nvtx.range_pop()
 
         log.info(f"Batch inference complete for {batch_size} videos")
         return output_videos, output_control_dicts, all_fps
