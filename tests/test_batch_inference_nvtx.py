@@ -30,6 +30,8 @@ if __name__ == "__main__":
     parser.add_argument("--guidance", type=int, default=7, help="Guidance scale")
     parser.add_argument("--state-t", type=int, default=24, 
                         help="Latent temporal frames (2=5 pixel, 4=13 pixel, 7=25 pixel, 24=93 pixel)")
+    parser.add_argument("--cuda-graphs", action="store_true",
+                        help="Enable CUDA Graphs to reduce kernel launch overhead")
     
     args = parser.parse_args()
     
@@ -41,6 +43,7 @@ if __name__ == "__main__":
         num_steps=args.num_steps,
         guidance=args.guidance,
         state_t=args.state_t,
+        use_cuda_graphs=args.cuda_graphs,
     )
     
     sys.exit(0 if success else 1)

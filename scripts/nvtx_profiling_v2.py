@@ -31,14 +31,6 @@ except ImportError:
                 return func
             return decorator
         
-        @staticmethod  
-        def push_range(message="", color=None):
-            pass
-        
-        @staticmethod
-        def pop_range():
-            pass
-        
         @staticmethod
         def start_range(message="", color=None):
             return None
@@ -70,15 +62,17 @@ class NVTXContext:
     def __init__(self, message, color=None):
         self.message = message
         self.color = color
+        self._range_id = None
         
     def __enter__(self):
         if HAS_NVTX:
-            nvtx.push_range(self.message, color=self.color)
+            # nvtx package uses start_range/end_range, not push_range/pop_range
+            self._range_id = nvtx.start_range(message=self.message, color=self.color)
         return self
     
     def __exit__(self, *args):
-        if HAS_NVTX:
-            nvtx.pop_range()
+        if HAS_NVTX and self._range_id is not None:
+            nvtx.end_range(self._range_id)
 
 
 def nvtx_range(message, color=None):
