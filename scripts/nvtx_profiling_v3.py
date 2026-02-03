@@ -306,6 +306,16 @@ def apply_all_patches():
             ControlVideo2WorldInference.generate_img2world = patched_gen_img2world
             print("  ✓ Patched ControlVideo2WorldInference.generate_img2world")
         
+        # Patch generate_img2world_batch for batch inference
+        if hasattr(ControlVideo2WorldInference, 'generate_img2world_batch'):
+            original_gen_img2world_batch = ControlVideo2WorldInference.generate_img2world_batch
+            @functools.wraps(original_gen_img2world_batch)
+            def patched_gen_img2world_batch(self, *args, **kwargs):
+                with NVTXContext("GENERATE_IMG2WORLD_BATCH", COLORS['batch_inference']):
+                    return original_gen_img2world_batch(self, *args, **kwargs)
+            ControlVideo2WorldInference.generate_img2world_batch = patched_gen_img2world_batch
+            print("  ✓ Patched ControlVideo2WorldInference.generate_img2world_batch")
+        
         # Patch _get_data_batch_input for data preparation
         if hasattr(ControlVideo2WorldInference, '_get_data_batch_input'):
             original_get_batch = ControlVideo2WorldInference._get_data_batch_input
@@ -318,6 +328,22 @@ def apply_all_patches():
             
     except Exception as e:
         print(f"  ✗ Could not patch ControlVideo2WorldInference: {e}")
+    
+    # 9b. Patch Control2WorldInference._generate_batch (high-level batch handler)
+    try:
+        from cosmos_transfer2.inference import Control2WorldInference
+        
+        if hasattr(Control2WorldInference, '_generate_batch'):
+            original_gen_batch_internal = Control2WorldInference._generate_batch
+            @functools.wraps(original_gen_batch_internal)
+            def patched_gen_batch_internal(self, batch_samples, output_dir, batch_offset=0):
+                with NVTXContext("_GENERATE_BATCH", COLORS['batch_inference']):
+                    return original_gen_batch_internal(self, batch_samples, output_dir, batch_offset)
+            Control2WorldInference._generate_batch = patched_gen_batch_internal
+            print("  ✓ Patched Control2WorldInference._generate_batch")
+            
+    except Exception as e:
+        print(f"  ✗ Could not patch _generate_batch: {e}")
     
     # 10. Patch text encoder
     try:
@@ -367,20 +393,43 @@ def apply_all_patches():
     except Exception as e:
         print(f"  ✗ Could not patch control input reading: {e}")
     
+    # 13. Patch torch.stack and torch.cat for batching visibility (adds noise but shows data prep)
+    # Skip this - too noisy
+    
+    # 14. Patch img_or_video saving for output visibility  
+    try:
+        from cosmos_transfer2._src.predict2.utils.io import save_img_or_video
+        import cosmos_transfer2._src.predict2.utils.io as io_module
+        
+        original_save = save_img_or_video
+        @functools.wraps(original_save)
+        def patched_save(*args, **kwargs):
+            with NVTXContext("SAVE_OUTPUT", 0x808080):  # Gray
+                return original_save(*args, **kwargs)
+        io_module.save_img_or_video = patched_save
+        print("  ✓ Patched save_img_or_video")
+        
+    except Exception as e:
+        print(f"  ✗ Could not patch save_img_or_video: {e}")
+    
     print("\nNVTX profiling v3 patches applied!")
     print("\nExpected markers in profile:")
     print("  GREEN:       === BATCH INFERENCE === (Control2WorldInference.generate_batch)")
+    print("  GREEN:       GENERATE_IMG2WORLD_BATCH, _GENERATE_BATCH")
     print("  RED:         === SEQUENTIAL INFERENCE === (Control2WorldInference.generate)")
-    print("  GOLD:        DATA_PREP_NORMALIZE, DATA_PREP_AUGMENT")
-    print("  PURPLE:      GET_CONDITIONING")
+    print("  RED:         GENERATE_IMG2WORLD")
+    print("  GOLD:        DATA_PREP_NORMALIZE, DATA_PREP_AUGMENT, READ_INPUT_VIDEO")
+    print("  PURPLE:      GET_CONDITIONING, TEXT_EMBEDDING_T5")
     print("  MED ORCHID:  VELOCITY_FN_SETUP (includes VAE encode + condition setup)")
     print("  DARK CYAN:   GET_DATA_AND_CONDITION (control input processing)")
+    print("  ORANGE:      READ_CONTROL_INPUT")
     print("  CYAN:        VAE_ENCODE, MODEL_ENCODE")
     print("  YELLOW:      DIFFUSION_SAMPLING, STEP_N")
     print("  ORANGE:      DENOISE_COND")
     print("  MAGENTA:     DENOISE_UNCOND")
     print("  PINK:        VAE_DECODE, MODEL_DECODE")
     print("  LIGHT BLUE:  DiT_FORWARD")
+    print("  GRAY:        SAVE_OUTPUT")
 
 
 if __name__ == "__main__":
