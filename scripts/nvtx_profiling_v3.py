@@ -21,29 +21,13 @@ Usage:
 import functools
 import torch
 
-try:
-    import nvtx
-    HAS_NVTX = True
-except ImportError:
-    HAS_NVTX = False
-    print("WARNING: nvtx not available. Install with: pip install nvtx")
-    
-    class _FakeNvtx:
-        @staticmethod
-        def annotate(message="", color=None):
-            def decorator(func):
-                return func
-            return decorator
-        
-        @staticmethod
-        def start_range(message="", color=None):
-            return None
-        
-        @staticmethod
-        def end_range(range_id):
-            pass
-    
-    nvtx = _FakeNvtx()
+# Use torch.cuda.nvtx for Nsight Systems compatibility
+# This is more reliable than the standalone nvtx package
+HAS_NVTX = hasattr(torch.cuda, 'nvtx')
+if HAS_NVTX:
+    print("Using torch.cuda.nvtx for profiling markers")
+else:
+    print("WARNING: torch.cuda.nvtx not available")
 
 
 # Color scheme for easy identification in Nsight
@@ -66,22 +50,19 @@ COLORS = {
 
 
 class NVTXContext:
-    """Context manager for NVTX ranges using nvtx.annotate()."""
+    """Context manager for NVTX ranges using torch.cuda.nvtx."""
     def __init__(self, message, color=None):
         self.message = message
-        self.color = color
-        self._ctx = None
+        # Note: torch.cuda.nvtx doesn't support colors, only messages
         
     def __enter__(self):
         if HAS_NVTX:
-            # Use nvtx.annotate() which is the recommended context manager API
-            self._ctx = nvtx.annotate(message=self.message, color=self.color)
-            self._ctx.__enter__()
+            torch.cuda.nvtx.range_push(self.message)
         return self
     
     def __exit__(self, *args):
-        if HAS_NVTX and self._ctx is not None:
-            self._ctx.__exit__(*args)
+        if HAS_NVTX:
+            torch.cuda.nvtx.range_pop()
 
 
 # Global state for tracking
