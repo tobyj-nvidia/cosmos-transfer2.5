@@ -227,23 +227,23 @@ def apply_all_patches():
     
     # 5. Patch VAE tokenizer encode/decode
     try:
-        from cosmos_transfer2._src.predict2.tokenizers.wan2pt1 import CausalVAETokenizer
+        from cosmos_transfer2._src.predict2.tokenizers.wan2pt1 import Wan2pt1VAEInterface
         
-        original_encode = CausalVAETokenizer.encode
+        original_encode = Wan2pt1VAEInterface.encode
         @functools.wraps(original_encode)
         def patched_encode(self, *args, **kwargs):
             with NVTXContext("VAE_ENCODE", COLORS['vae_encode_input']):
                 return original_encode(self, *args, **kwargs)
-        CausalVAETokenizer.encode = patched_encode
-        print("  ✓ Patched CausalVAETokenizer.encode")
+        Wan2pt1VAEInterface.encode = patched_encode
+        print("  ✓ Patched Wan2pt1VAEInterface.encode")
         
-        original_decode = CausalVAETokenizer.decode
+        original_decode = Wan2pt1VAEInterface.decode
         @functools.wraps(original_decode)
         def patched_decode(self, *args, **kwargs):
             with NVTXContext("VAE_DECODE", COLORS['vae_decode']):
                 return original_decode(self, *args, **kwargs)
-        CausalVAETokenizer.decode = patched_decode
-        print("  ✓ Patched CausalVAETokenizer.decode")
+        Wan2pt1VAEInterface.decode = patched_decode
+        print("  ✓ Patched Wan2pt1VAEInterface.decode")
         
     except ImportError as e:
         print(f"  ✗ Could not patch VAE tokenizer: {e}")
