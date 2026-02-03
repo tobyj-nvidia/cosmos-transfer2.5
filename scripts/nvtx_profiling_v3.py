@@ -103,33 +103,33 @@ def apply_all_patches():
     
     print("Applying NVTX profiling patches v3 (granular)...")
     
-    # 1. Patch the high-level pipeline entry points
+    # 1. Patch the high-level pipeline entry points (Control2WorldInference)
     try:
-        from cosmos_transfer2.inference import CosmosTransfer2Pipeline
+        from cosmos_transfer2.inference import Control2WorldInference
         
-        original_generate = CosmosTransfer2Pipeline.generate
+        original_generate = Control2WorldInference.generate
         @functools.wraps(original_generate)
         def patched_generate(self, *args, **kwargs):
             _state['mode'] = 'sequential'
             reset_state()
             with NVTXContext("=== SEQUENTIAL INFERENCE ===", COLORS['sequential_inference']):
                 return original_generate(self, *args, **kwargs)
-        CosmosTransfer2Pipeline.generate = patched_generate
-        print("  ✓ Patched CosmosTransfer2Pipeline.generate")
+        Control2WorldInference.generate = patched_generate
+        print("  ✓ Patched Control2WorldInference.generate")
         
-        if hasattr(CosmosTransfer2Pipeline, '_generate_batch'):
-            original_gen_batch = CosmosTransfer2Pipeline._generate_batch
+        if hasattr(Control2WorldInference, 'generate_batch'):
+            original_gen_batch = Control2WorldInference.generate_batch
             @functools.wraps(original_gen_batch)
             def patched_gen_batch(self, *args, **kwargs):
                 _state['mode'] = 'batch'
                 reset_state()
                 with NVTXContext("=== BATCH INFERENCE ===", COLORS['batch_inference']):
                     return original_gen_batch(self, *args, **kwargs)
-            CosmosTransfer2Pipeline._generate_batch = patched_gen_batch
-            print("  ✓ Patched CosmosTransfer2Pipeline._generate_batch")
+            Control2WorldInference.generate_batch = patched_gen_batch
+            print("  ✓ Patched Control2WorldInference.generate_batch")
             
     except ImportError as e:
-        print(f"  ✗ Could not patch CosmosTransfer2Pipeline: {e}")
+        print(f"  ✗ Could not patch Control2WorldInference: {e}")
     
     # 2. Patch generate_samples_from_batch with granular markers
     try:
@@ -311,8 +311,8 @@ def apply_all_patches():
     
     print("\nNVTX profiling v3 patches applied!")
     print("\nExpected markers in profile:")
-    print("  GREEN:       === BATCH INFERENCE ===")
-    print("  RED:         === SEQUENTIAL INFERENCE ===")
+    print("  GREEN:       === BATCH INFERENCE === (Control2WorldInference.generate_batch)")
+    print("  RED:         === SEQUENTIAL INFERENCE === (Control2WorldInference.generate)")
     print("  GOLD:        DATA_PREP_NORMALIZE, DATA_PREP_AUGMENT")
     print("  PURPLE:      GET_CONDITIONING")
     print("  MED ORCHID:  VELOCITY_FN_SETUP (includes VAE encode + condition setup)")
