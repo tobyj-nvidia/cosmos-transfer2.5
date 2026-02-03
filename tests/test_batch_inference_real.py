@@ -27,18 +27,18 @@ from typing import Any
 
 import torch
 
-# Try to import nvtx for profiling markers
-try:
-    import nvtx
-    HAS_NVTX = True
-except ImportError:
-    HAS_NVTX = False
-    class _FakeNvtx:
-        @staticmethod
-        def push_range(message="", color=None): pass
-        @staticmethod
-        def pop_range(): pass
-    nvtx = _FakeNvtx()
+# Use torch.cuda.nvtx for profiling markers (always available with PyTorch)
+# This provides range_push/range_pop that show up in nsys profiles
+class nvtx:
+    """Wrapper for torch.cuda.nvtx to provide consistent API."""
+    @staticmethod
+    def push_range(message="", color=None):
+        # torch.cuda.nvtx doesn't support colors, but message works
+        torch.cuda.nvtx.range_push(message)
+    
+    @staticmethod
+    def pop_range():
+        torch.cuda.nvtx.range_pop()
 
 
 # ============================================================================
