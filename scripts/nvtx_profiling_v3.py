@@ -263,37 +263,109 @@ def apply_all_patches():
     except ImportError as e:
         print(f"  ✗ Could not patch DiT network: {e}")
     
-    # 7. Patch model.decode (at the model level)
+    # 7. Patch model.decode (at the model level) - use Text2WorldModelRectifiedFlow
     try:
-        from cosmos_transfer2._src.predict2.models.text2world_model import Text2WorldModel
-        
-        if hasattr(Text2WorldModel, 'decode'):
-            original_model_decode = Text2WorldModel.decode
+        # Text2WorldModelRectifiedFlow has the actual encode/decode methods
+        if hasattr(Text2WorldModelRectifiedFlow, 'decode'):
+            original_model_decode = Text2WorldModelRectifiedFlow.decode
             @functools.wraps(original_model_decode)
             def patched_model_decode(self, *args, **kwargs):
                 with NVTXContext("MODEL_DECODE", COLORS['vae_decode']):
                     return original_model_decode(self, *args, **kwargs)
-            Text2WorldModel.decode = patched_model_decode
-            print("  ✓ Patched Text2WorldModel.decode")
+            Text2WorldModelRectifiedFlow.decode = patched_model_decode
+            print("  ✓ Patched Text2WorldModelRectifiedFlow.decode")
             
-    except ImportError as e:
+    except Exception as e:
         print(f"  ✗ Could not patch model decode: {e}")
     
     # 8. Patch model.encode (for input video encoding)
     try:
-        from cosmos_transfer2._src.predict2.models.text2world_model import Text2WorldModel
-        
-        if hasattr(Text2WorldModel, 'encode'):
-            original_model_encode = Text2WorldModel.encode
+        if hasattr(Text2WorldModelRectifiedFlow, 'encode'):
+            original_model_encode = Text2WorldModelRectifiedFlow.encode
             @functools.wraps(original_model_encode)
             def patched_model_encode(self, *args, **kwargs):
                 with NVTXContext("MODEL_ENCODE", COLORS['vae_encode_input']):
                     return original_model_encode(self, *args, **kwargs)
-            Text2WorldModel.encode = patched_model_encode
-            print("  ✓ Patched Text2WorldModel.encode")
+            Text2WorldModelRectifiedFlow.encode = patched_model_encode
+            print("  ✓ Patched Text2WorldModelRectifiedFlow.encode")
             
-    except ImportError as e:
+    except Exception as e:
         print(f"  ✗ Could not patch model encode: {e}")
+    
+    # 9. Patch the inference pipeline methods
+    try:
+        from cosmos_transfer2._src.transfer2.inference.inference_pipeline import ControlVideo2WorldInference
+        
+        # Patch generate_img2world for overall tracking
+        if hasattr(ControlVideo2WorldInference, 'generate_img2world'):
+            original_gen_img2world = ControlVideo2WorldInference.generate_img2world
+            @functools.wraps(original_gen_img2world)
+            def patched_gen_img2world(self, *args, **kwargs):
+                with NVTXContext("GENERATE_IMG2WORLD", COLORS['sequential_inference']):
+                    return original_gen_img2world(self, *args, **kwargs)
+            ControlVideo2WorldInference.generate_img2world = patched_gen_img2world
+            print("  ✓ Patched ControlVideo2WorldInference.generate_img2world")
+        
+        # Patch _get_data_batch_input for data preparation
+        if hasattr(ControlVideo2WorldInference, '_get_data_batch_input'):
+            original_get_batch = ControlVideo2WorldInference._get_data_batch_input
+            @functools.wraps(original_get_batch)
+            def patched_get_batch(self, *args, **kwargs):
+                with NVTXContext("GET_DATA_BATCH_INPUT", COLORS['data_prep']):
+                    return original_get_batch(self, *args, **kwargs)
+            ControlVideo2WorldInference._get_data_batch_input = patched_get_batch
+            print("  ✓ Patched ControlVideo2WorldInference._get_data_batch_input")
+            
+    except Exception as e:
+        print(f"  ✗ Could not patch ControlVideo2WorldInference: {e}")
+    
+    # 10. Patch text encoder
+    try:
+        from cosmos_transfer2._src.transfer2.inference.utils import get_t5_from_prompt
+        import cosmos_transfer2._src.transfer2.inference.utils as utils_module
+        
+        original_get_t5 = get_t5_from_prompt
+        @functools.wraps(original_get_t5)
+        def patched_get_t5(*args, **kwargs):
+            with NVTXContext("TEXT_EMBEDDING_T5", COLORS['conditioning']):
+                return original_get_t5(*args, **kwargs)
+        utils_module.get_t5_from_prompt = patched_get_t5
+        print("  ✓ Patched get_t5_from_prompt")
+        
+    except Exception as e:
+        print(f"  ✗ Could not patch text encoder: {e}")
+    
+    # 11. Patch video reading
+    try:
+        from cosmos_transfer2._src.transfer2.inference.utils import read_and_process_video
+        import cosmos_transfer2._src.transfer2.inference.utils as utils_module
+        
+        original_read_video = read_and_process_video
+        @functools.wraps(original_read_video)
+        def patched_read_video(*args, **kwargs):
+            with NVTXContext("READ_INPUT_VIDEO", COLORS['data_prep']):
+                return original_read_video(*args, **kwargs)
+        utils_module.read_and_process_video = patched_read_video
+        print("  ✓ Patched read_and_process_video")
+        
+    except Exception as e:
+        print(f"  ✗ Could not patch video reading: {e}")
+    
+    # 12. Patch control input reading
+    try:
+        from cosmos_transfer2._src.transfer2.inference.utils import read_and_process_control_input
+        import cosmos_transfer2._src.transfer2.inference.utils as utils_module
+        
+        original_read_control = read_and_process_control_input
+        @functools.wraps(original_read_control)
+        def patched_read_control(*args, **kwargs):
+            with NVTXContext("READ_CONTROL_INPUT", COLORS['control_setup']):
+                return original_read_control(*args, **kwargs)
+        utils_module.read_and_process_control_input = patched_read_control
+        print("  ✓ Patched read_and_process_control_input")
+        
+    except Exception as e:
+        print(f"  ✗ Could not patch control input reading: {e}")
     
     print("\nNVTX profiling v3 patches applied!")
     print("\nExpected markers in profile:")
