@@ -214,6 +214,7 @@ def test_batch_inference_real(
     num_steps: int = 4,
     guidance: int = 7,
     state_t: int = 24,
+    use_cuda_graphs: bool = False,
 ):
     """
     Run batch inference with 2 real videos and GPU monitoring.
@@ -305,9 +306,11 @@ def test_batch_inference_real(
         setup_args, 
         batch_hint_keys=batch_hint_keys,
         state_t=state_t,
+        use_cuda_graphs=use_cuda_graphs,
     )
     init_time = time.time() - start_init
-    print(f"Model loaded in {init_time:.1f}s (state_t={state_t})")
+    cuda_graphs_str = " with CUDA Graphs" if use_cuda_graphs else ""
+    print(f"Model loaded in {init_time:.1f}s (state_t={state_t}){cuda_graphs_str}")
     
     # ========== WARMUP RUN ==========
     # Run a single sample first to warm up JIT compilation, CUDA kernels, etc.
@@ -463,6 +466,8 @@ if __name__ == "__main__":
     parser.add_argument("--guidance", type=int, default=7, help="Guidance scale")
     parser.add_argument("--state-t", type=int, default=24, 
                         help="Latent temporal frames (2=5 pixel, 4=13 pixel, 7=25 pixel, 24=93 pixel)")
+    parser.add_argument("--cuda-graphs", action="store_true",
+                        help="Enable CUDA Graphs to reduce kernel launch overhead")
     
     args = parser.parse_args()
     
@@ -474,6 +479,7 @@ if __name__ == "__main__":
         num_steps=args.num_steps,
         guidance=args.guidance,
         state_t=args.state_t,
+        use_cuda_graphs=args.cuda_graphs,
     )
     
     sys.exit(0 if success else 1)

@@ -45,6 +45,7 @@ class Control2WorldInference:
         args: SetupArguments,
         batch_hint_keys: list[str],
         state_t: int = DEFAULT_STATE_T,
+        use_cuda_graphs: bool = False,
     ) -> None:
         """
         Initialize Control2World inference.
@@ -58,11 +59,15 @@ class Control2WorldInference:
                      - state_t=7 → 25 pixel frames
                      - state_t=24 → 93 pixel frames (default)
                      Formula: pixel_frames = (state_t - 1) * 4 + 1
+            use_cuda_graphs: Whether to use CUDA Graphs for inference.
+                     Dramatically reduces kernel launch overhead but requires
+                     fixed input shapes (controlled via state_t).
         """
         log.debug(f"{args.__class__.__name__}({args})({batch_hint_keys})")
         self.setup_args = args
         self.batch_hint_keys = batch_hint_keys
         self.state_t = state_t
+        self.use_cuda_graphs = use_cuda_graphs
         
         if len(self.batch_hint_keys) == 1:
             # pyrefly: ignore  # bad-argument-type
@@ -121,7 +126,11 @@ class Control2WorldInference:
             use_cp_wan=args.enable_parallel_tokenizer,
             wan_cp_grid=args.parallel_tokenizer_grid,
             benchmark_timer=self.benchmark_timer if args.benchmark else None,
+            use_cuda_graphs=use_cuda_graphs,
         )
+        
+        if use_cuda_graphs:
+            log.info("CUDA Graphs enabled - kernel launches will be captured and replayed")
 
         compile_tokenizer_if_enabled(self.inference_pipeline, args.compile_tokenizer.value)
 
