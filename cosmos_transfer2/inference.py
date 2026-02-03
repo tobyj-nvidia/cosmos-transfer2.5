@@ -248,10 +248,12 @@ class Control2WorldInference:
         if not batch_samples:
             return []
 
+        import torch
         batch_size = len(batch_samples)
         log.info(f"Running batch inference for {batch_size} samples")
 
         # Validate batch compatibility
+        torch.cuda.nvtx.range_push("BATCH_PREP_VALIDATE")
         first_sample = batch_samples[0]
         for sample in batch_samples[1:]:
             if sample.resolution != first_sample.resolution:
@@ -279,6 +281,7 @@ class Control2WorldInference:
         for key in self.batch_hint_keys:
             control_weight += first_sample.control_weight_dict.get(key, "0.0") + ","
         control_weight = control_weight[:-1]
+        torch.cuda.nvtx.range_pop()
 
         # Run batched inference through the pipeline
         with self.benchmark_timer("generate_img2world_batch"):
@@ -297,6 +300,8 @@ class Control2WorldInference:
             )
 
         # Save outputs
+        import torch
+        torch.cuda.nvtx.range_push("SAVE_BATCH_OUTPUTS")
         output_paths: list[str | None] = []
         for i, (sample, output_video, control_video_dict, fps) in enumerate(
             zip(batch_samples, output_videos, control_video_dicts, fps_list)
@@ -322,6 +327,7 @@ class Control2WorldInference:
                 output_paths.append(f"{output_path}.{ext}")
             else:
                 output_paths.append(None)
+        torch.cuda.nvtx.range_pop()
 
         torch.cuda.empty_cache()
         return output_paths
