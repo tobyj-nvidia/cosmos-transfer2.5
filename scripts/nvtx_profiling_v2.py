@@ -58,21 +58,22 @@ COLORS = {
 
 
 class NVTXContext:
-    """Context manager for NVTX ranges."""
+    """Context manager for NVTX ranges using nvtx.annotate()."""
     def __init__(self, message, color=None):
         self.message = message
         self.color = color
-        self._range_id = None
+        self._ctx = None
         
     def __enter__(self):
         if HAS_NVTX:
-            # nvtx package uses start_range/end_range, not push_range/pop_range
-            self._range_id = nvtx.start_range(message=self.message, color=self.color)
+            # Use nvtx.annotate() which is the recommended context manager API
+            self._ctx = nvtx.annotate(message=self.message, color=self.color)
+            self._ctx.__enter__()
         return self
     
     def __exit__(self, *args):
-        if HAS_NVTX and self._range_id is not None:
-            nvtx.end_range(self._range_id)
+        if HAS_NVTX and self._ctx is not None:
+            self._ctx.__exit__(*args)
 
 
 def nvtx_range(message, color=None):

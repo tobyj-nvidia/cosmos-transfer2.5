@@ -30,21 +30,22 @@ import torch
 # Try nvtx package first, fall back to torch.cuda.nvtx
 try:
     import nvtx as _nvtx
-    # nvtx package uses start_range/end_range, not push_range/pop_range
+    # Use nvtx.annotate() context manager API
     class nvtx:
-        """Wrapper for nvtx package."""
-        _range_stack = []
+        """Wrapper for nvtx package using annotate() API."""
+        _ctx_stack = []
         
         @staticmethod
         def push_range(message="", color=None):
-            rng = _nvtx.start_range(message=message, color=color)
-            nvtx._range_stack.append(rng)
+            ctx = _nvtx.annotate(message=message, color=color)
+            ctx.__enter__()
+            nvtx._ctx_stack.append(ctx)
         
         @staticmethod
         def pop_range():
-            if nvtx._range_stack:
-                rng = nvtx._range_stack.pop()
-                _nvtx.end_range(rng)
+            if nvtx._ctx_stack:
+                ctx = nvtx._ctx_stack.pop()
+                ctx.__exit__(None, None, None)
     print("Using nvtx package for profiling markers")
 except ImportError:
     # Fall back to torch.cuda.nvtx
