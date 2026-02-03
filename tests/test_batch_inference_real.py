@@ -27,6 +27,19 @@ from typing import Any
 
 import torch
 
+# Try to import nvtx for profiling markers
+try:
+    import nvtx
+    HAS_NVTX = True
+except ImportError:
+    HAS_NVTX = False
+    class _FakeNvtx:
+        @staticmethod
+        def push_range(message="", color=None): pass
+        @staticmethod
+        def pop_range(): pass
+    nvtx = _FakeNvtx()
+
 
 # ============================================================================
 # GPU Monitor (embedded to avoid cross-repo imports)
@@ -295,12 +308,14 @@ def test_batch_inference_real(
         num_video_frames_per_chunk=expected_pixel_frames,
     )
     
+    nvtx.push_range("=== WARMUP (exclude from analysis) ===", color=0x808080)  # Gray
     warmup_start = time.time()
     warmup_output = inference.generate(
         samples=[warmup_sample],
         output_dir=output_path / "warmup",
     )
     warmup_time = time.time() - warmup_start
+    nvtx.pop_range()
     print(f"  Warmup complete in {warmup_time:.1f}s (excluded from comparisons)")
     
     # Clear CUDA cache after warmup
@@ -316,6 +331,7 @@ def test_batch_inference_real(
     gpu_monitor_batch = GPUMonitor(interval=0.5)
     gpu_monitor_batch.start()
     
+    nvtx.push_range("=== BATCH INFERENCE ===", color=0x00FF00)  # Green
     start_batch = time.time()
     batch_outputs = inference.generate_batch(
         samples=[sample1, sample2],
@@ -323,6 +339,7 @@ def test_batch_inference_real(
         batch_size=2,
     )
     batch_time = time.time() - start_batch
+    nvtx.pop_range()
     
     batch_gpu_metrics = gpu_monitor_batch.stop()
     batch_memory = torch.cuda.max_memory_allocated() / 1024**3
@@ -346,12 +363,14 @@ def test_batch_inference_real(
     gpu_monitor_seq = GPUMonitor(interval=0.5)
     gpu_monitor_seq.start()
     
+    nvtx.push_range("=== SEQUENTIAL INFERENCE ===", color=0xFF0000)  # Red
     start_seq = time.time()
     seq_outputs = inference.generate(
         samples=[sample1, sample2],
         output_dir=output_path / "sequential",
     )
     seq_time = time.time() - start_seq
+    nvtx.pop_range()
     
     seq_gpu_metrics = gpu_monitor_seq.stop()
     seq_memory = torch.cuda.max_memory_allocated() / 1024**3
