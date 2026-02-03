@@ -462,7 +462,6 @@ class ControlVideo2WorldInference:
                 resolution=resolution,
                 seg_control_prompt=seg_control_prompt,
             )
-        torch.cuda.nvtx.range_pop()
 
             # -------- Stuff to handle chunk-wise long video generation --------
             num_total_frames, num_chunks, num_frames_per_chunk = self._get_num_chunks(
@@ -476,6 +475,7 @@ class ControlVideo2WorldInference:
             all_control_chunks = {key: [] for key in hint_key}
             # For first chunk, use zeros as input (after normalization it is 0)
             prev_output = torch.zeros_like(input_frames[:, :num_video_frames_per_chunk]).to(torch.uint8).cuda()[None]
+        torch.cuda.nvtx.range_pop()
 
         # --------Start of chunk-wise long video generation--------
         self.model.eval()
