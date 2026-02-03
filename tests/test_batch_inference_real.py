@@ -438,7 +438,8 @@ def test_batch_inference_real(
     print("\n" + "=" * 60)
     print("SUMMARY (after warmup)")
     print("=" * 60)
-    print(f"Warmup time (excluded): {warmup_time:.1f}s")
+    total_warmup_time = warmup_single_time + warmup_batch_time
+    print(f"Warmup time (excluded): {total_warmup_time:.1f}s (single: {warmup_single_time:.1f}s, batch: {warmup_batch_time:.1f}s)")
     print()
     print(f"{'Metric':<25} {'Batch':>15} {'Sequential':>15}")
     print("-" * 55)
@@ -454,7 +455,7 @@ def test_batch_inference_real(
     # Save detailed metrics to JSON
     metrics_file = output_path / "gpu_metrics.json"
     metrics_data = {
-        "warmup_seconds": round(warmup_time, 2),
+        "warmup_seconds": round(total_warmup_time, 2),
         "batch": {
             "time_seconds": round(batch_time, 2),
             "memory_gb": round(batch_memory, 2),
