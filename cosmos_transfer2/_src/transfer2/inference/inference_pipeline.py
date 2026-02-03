@@ -806,7 +806,9 @@ class ControlVideo2WorldInference:
             if all(c is not None for c in control_list):
                 # Stack along new dim=0 to get (B, C, T, H, W)
                 control_batch = torch.stack(control_list, dim=0)
-                data_batch[control_key] = control_batch.to(dtype=torch.bfloat16, device="cuda")
+                # Keep as uint8! Model's _normalize_video_databatch_inplace expects uint8 and
+                # will normalize to [-1, 1]. Converting to bfloat16 here bypasses normalization.
+                data_batch[control_key] = control_batch.to(device="cuda")
                 loaded_control_keys.add(key)
                 # Add mask for this control
                 mask_key = f"{control_key}_mask"
