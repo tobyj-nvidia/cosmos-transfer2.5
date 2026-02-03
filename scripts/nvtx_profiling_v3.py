@@ -100,12 +100,15 @@ def reset_state():
 
 def apply_all_patches():
     """Apply all NVTX patches for comprehensive profiling."""
+    import sys
     
-    print("Applying NVTX profiling patches v3 (granular)...")
+    print("Applying NVTX profiling patches v3 (granular)...", flush=True)
     
     # 1. Patch the high-level pipeline entry points (Control2WorldInference)
     try:
+        print("  Attempting to import Control2WorldInference...", flush=True)
         from cosmos_transfer2.inference import Control2WorldInference
+        print("  Import successful, patching...", flush=True)
         
         original_generate = Control2WorldInference.generate
         @functools.wraps(original_generate)
@@ -115,7 +118,7 @@ def apply_all_patches():
             with NVTXContext("=== SEQUENTIAL INFERENCE ===", COLORS['sequential_inference']):
                 return original_generate(self, *args, **kwargs)
         Control2WorldInference.generate = patched_generate
-        print("  ✓ Patched Control2WorldInference.generate")
+        print("  ✓ Patched Control2WorldInference.generate", flush=True)
         
         if hasattr(Control2WorldInference, 'generate_batch'):
             original_gen_batch = Control2WorldInference.generate_batch
@@ -126,10 +129,12 @@ def apply_all_patches():
                 with NVTXContext("=== BATCH INFERENCE ===", COLORS['batch_inference']):
                     return original_gen_batch(self, *args, **kwargs)
             Control2WorldInference.generate_batch = patched_gen_batch
-            print("  ✓ Patched Control2WorldInference.generate_batch")
+            print("  ✓ Patched Control2WorldInference.generate_batch", flush=True)
+        else:
+            print("  ✗ Control2WorldInference has no generate_batch method", flush=True)
             
-    except ImportError as e:
-        print(f"  ✗ Could not patch Control2WorldInference: {e}")
+    except Exception as e:
+        print(f"  ✗ Could not patch Control2WorldInference: {type(e).__name__}: {e}", flush=True)
     
     # 2. Patch generate_samples_from_batch with granular markers
     try:
