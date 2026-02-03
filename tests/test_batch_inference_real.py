@@ -250,6 +250,7 @@ def test_batch_inference_real(
         num_steps=num_steps,
         seed=42,
         depth=DepthConfig(control_path=video1),
+        num_video_frames_per_chunk=expected_pixel_frames,
     )
     
     sample2 = InferenceArguments(
@@ -260,6 +261,7 @@ def test_batch_inference_real(
         num_steps=num_steps,
         seed=142,
         depth=DepthConfig(control_path=video2),
+        num_video_frames_per_chunk=expected_pixel_frames,
     )
     
     # Initialize inference
