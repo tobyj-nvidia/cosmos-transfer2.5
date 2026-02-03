@@ -277,6 +277,36 @@ def test_batch_inference_real(
     init_time = time.time() - start_init
     print(f"Model loaded in {init_time:.1f}s (state_t={state_t})")
     
+    # ========== WARMUP RUN ==========
+    # Run a single sample first to warm up JIT compilation, CUDA kernels, etc.
+    # This ensures neither batch nor sequential is penalized by warmup overhead.
+    print("\n" + "=" * 60)
+    print("Running WARMUP inference (1 sample to warm JIT/kernels)...")
+    print("=" * 60)
+    
+    warmup_sample = InferenceArguments(
+        name="warmup",
+        video_path=video1,
+        prompt=prompt,
+        guidance=guidance,
+        num_steps=num_steps,
+        seed=999,
+        depth=DepthConfig(control_path=video1),
+        num_video_frames_per_chunk=expected_pixel_frames,
+    )
+    
+    warmup_start = time.time()
+    warmup_output = inference.generate(
+        samples=[warmup_sample],
+        output_dir=output_path / "warmup",
+    )
+    warmup_time = time.time() - warmup_start
+    print(f"  Warmup complete in {warmup_time:.1f}s (excluded from comparisons)")
+    
+    # Clear CUDA cache after warmup
+    torch.cuda.empty_cache()
+    torch.cuda.reset_peak_memory_stats()
+    
     # ========== BATCH INFERENCE ==========
     print("\n" + "=" * 60)
     print("Running BATCH inference (2 videos in parallel)...")
@@ -337,8 +367,10 @@ def test_batch_inference_real(
     
     # ========== SUMMARY ==========
     print("\n" + "=" * 60)
-    print("SUMMARY")
+    print("SUMMARY (after warmup)")
     print("=" * 60)
+    print(f"Warmup time (excluded): {warmup_time:.1f}s")
+    print()
     print(f"{'Metric':<25} {'Batch':>15} {'Sequential':>15}")
     print("-" * 55)
     print(f"{'Total time (s)':<25} {batch_time:>15.1f} {seq_time:>15.1f}")
@@ -353,6 +385,7 @@ def test_batch_inference_real(
     # Save detailed metrics to JSON
     metrics_file = output_path / "gpu_metrics.json"
     metrics_data = {
+        "warmup_seconds": round(warmup_time, 2),
         "batch": {
             "time_seconds": round(batch_time, 2),
             "memory_gb": round(batch_memory, 2),
@@ -370,6 +403,8 @@ def test_batch_inference_real(
             "num_steps": num_steps,
             "guidance": guidance,
             "prompt": prompt,
+            "state_t": state_t,
+            "expected_pixel_frames": expected_pixel_frames,
         }
     }
     
