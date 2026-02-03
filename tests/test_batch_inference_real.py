@@ -27,18 +27,37 @@ from typing import Any
 
 import torch
 
-# Use torch.cuda.nvtx for profiling markers (always available with PyTorch)
-# This provides range_push/range_pop that show up in nsys profiles
-class nvtx:
-    """Wrapper for torch.cuda.nvtx to provide consistent API."""
-    @staticmethod
-    def push_range(message="", color=None):
-        # torch.cuda.nvtx doesn't support colors, but message works
-        torch.cuda.nvtx.range_push(message)
-    
-    @staticmethod
-    def pop_range():
-        torch.cuda.nvtx.range_pop()
+# Try nvtx package first, fall back to torch.cuda.nvtx
+try:
+    import nvtx as _nvtx
+    # nvtx package uses start_range/end_range, not push_range/pop_range
+    class nvtx:
+        """Wrapper for nvtx package."""
+        _range_stack = []
+        
+        @staticmethod
+        def push_range(message="", color=None):
+            rng = _nvtx.start_range(message=message, color=color)
+            nvtx._range_stack.append(rng)
+        
+        @staticmethod
+        def pop_range():
+            if nvtx._range_stack:
+                rng = nvtx._range_stack.pop()
+                _nvtx.end_range(rng)
+    print("Using nvtx package for profiling markers")
+except ImportError:
+    # Fall back to torch.cuda.nvtx
+    class nvtx:
+        """Wrapper for torch.cuda.nvtx."""
+        @staticmethod
+        def push_range(message="", color=None):
+            torch.cuda.nvtx.range_push(message)
+        
+        @staticmethod
+        def pop_range():
+            torch.cuda.nvtx.range_pop()
+    print("Using torch.cuda.nvtx for profiling markers")
 
 
 # ============================================================================
