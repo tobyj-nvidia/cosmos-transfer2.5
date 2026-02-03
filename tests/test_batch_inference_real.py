@@ -314,14 +314,15 @@ def test_batch_inference_real(
     print(f"Model loaded in {init_time:.1f}s (state_t={state_t}){cuda_graphs_str}")
     
     # ========== WARMUP RUN ==========
-    # Run a single sample first to warm up JIT compilation, CUDA kernels, etc.
-    # This ensures neither batch nor sequential is penalized by warmup overhead.
+    # IMPORTANT: Must warm up BOTH batch_size=1 AND batch_size=2 kernels!
+    # Different batch sizes have different tensor shapes → different JIT-compiled kernels.
+    # Without batch warmup, the batch run would include JIT compilation overhead.
     print("\n" + "=" * 60)
-    print("Running WARMUP inference (1 sample to warm JIT/kernels)...")
+    print("Running WARMUP inference (warming both batch_size=1 and batch_size=2 kernels)...")
     print("=" * 60)
     
-    warmup_sample = InferenceArguments(
-        name="warmup",
+    warmup_sample1 = InferenceArguments(
+        name="warmup1",
         video_path=video1,
         prompt=prompt,
         guidance=guidance,
@@ -330,16 +331,42 @@ def test_batch_inference_real(
         depth=DepthConfig(control_path=video1),
         num_video_frames_per_chunk=expected_pixel_frames,
     )
+    warmup_sample2 = InferenceArguments(
+        name="warmup2",
+        video_path=video2,
+        prompt=prompt,
+        guidance=guidance,
+        num_steps=num_steps,
+        seed=998,
+        depth=DepthConfig(control_path=video2),
+        num_video_frames_per_chunk=expected_pixel_frames,
+    )
     
     nvtx.push_range("=== WARMUP (exclude from analysis) ===", color=0x808080)  # Gray
+    
+    # Warmup 1: Single sample (batch_size=1 kernels)
+    print("  Warming up batch_size=1 kernels...")
     warmup_start = time.time()
     warmup_output = inference.generate(
-        samples=[warmup_sample],
-        output_dir=output_path / "warmup",
+        samples=[warmup_sample1],
+        output_dir=output_path / "warmup_single",
     )
-    warmup_time = time.time() - warmup_start
+    warmup_single_time = time.time() - warmup_start
+    print(f"    Single warmup: {warmup_single_time:.1f}s")
+    
+    # Warmup 2: Batch of 2 samples (batch_size=2 kernels)
+    print("  Warming up batch_size=2 kernels...")
+    warmup_batch_start = time.time()
+    warmup_batch_output = inference.generate_batch(
+        samples=[warmup_sample1, warmup_sample2],
+        output_dir=output_path / "warmup_batch",
+        batch_size=2,
+    )
+    warmup_batch_time = time.time() - warmup_batch_start
+    print(f"    Batch warmup: {warmup_batch_time:.1f}s")
+    
     nvtx.pop_range()
-    print(f"  Warmup complete in {warmup_time:.1f}s (excluded from comparisons)")
+    print(f"  Total warmup: {warmup_single_time + warmup_batch_time:.1f}s (excluded from comparisons)")
     
     # Clear CUDA cache after warmup
     torch.cuda.empty_cache()
