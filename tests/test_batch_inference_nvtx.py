@@ -12,8 +12,9 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Apply NVTX patches BEFORE importing cosmos modules
-from scripts.add_nvtx_profiling import apply_nvtx_patches
-apply_nvtx_patches()
+# Use v2 for comprehensive profiling
+from scripts.nvtx_profiling_v2 import apply_all_patches
+apply_all_patches()
 
 # Now run the actual test
 from tests.test_batch_inference_real import test_batch_inference_real
