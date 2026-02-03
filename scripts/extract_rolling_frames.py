@@ -89,7 +89,7 @@ def extract_frame_window(
         "-y",  # Overwrite output
         "-i", input_path,
         "-vf", f"select='between(n,{start_frame},{end_frame})',setpts=N/FRAME_RATE/TB",
-        "-fps_mode", "vfr",
+        "-vsync", "vfr",  # Use -vsync for older ffmpeg compatibility (vs -fps_mode)
         "-r", str(fps),
         "-c:v", "libx264",
         "-crf", "18",
