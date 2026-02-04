@@ -177,8 +177,8 @@ def main():
     # =================================================================
     # Monkey-patch to capture diffusion-only timing
     # =================================================================
-    from cosmos_transfer2._src.predict2.models import text2world_model_rectified_flow
-    original_generate = text2world_model_rectified_flow.Text2WorldModel.generate_samples_from_batch
+    from cosmos_transfer2._src.predict2.models.text2world_model_rectified_flow import Text2WorldModelRectifiedFlow
+    original_generate = Text2WorldModelRectifiedFlow.generate_samples_from_batch
     
     diffusion_times = {"sequential": [], "batched": []}
     current_mode = [None]  # Use list to allow modification in nested function
@@ -193,7 +193,7 @@ def main():
             diffusion_times[current_mode[0]].append(elapsed)
         return result
     
-    text2world_model_rectified_flow.Text2WorldModel.generate_samples_from_batch = timed_generate
+    Text2WorldModelRectifiedFlow.generate_samples_from_batch = timed_generate
     
     # =================================================================
     # Test 1: Original sequential CFG (use_cfg_batching=False)
