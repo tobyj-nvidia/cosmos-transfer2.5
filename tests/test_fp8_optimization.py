@@ -163,9 +163,9 @@ def main():
     
     # Setup arguments
     setup_args = SetupArguments(
-        checkpoint_dir="",
-        enable_guardrails=False,
-        benchmark=False,
+        model="depth",
+        output_dir=output_path,
+        disable_guardrails=True,
     )
     
     # Helper to create sample config
