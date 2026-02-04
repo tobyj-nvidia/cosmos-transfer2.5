@@ -437,6 +437,15 @@ class ControlVideo2WorldModelRectifiedFlow(Video2WorldModelRectifiedFlow):
             else:
                 img_context_batched = img_context_cond  # Will be None if not present
             
+            # Stack padding_mask if present (it's a tensor)
+            padding_mask_cond = cond_dict.get("padding_mask")
+            padding_mask_uncond = uncond_dict.get("padding_mask")
+            if padding_mask_cond is not None and padding_mask_uncond is not None:
+                # padding_mask should be identical for both cond and uncond
+                padding_mask_batched = torch.cat([padding_mask_cond, padding_mask_uncond], dim=0)
+            else:
+                padding_mask_batched = padding_mask_cond  # Will be None if not present
+            
             # Step 3: Single batched forward pass through DiT (with precomputed hints)
             both_v = self.net(
                 x_B_C_T_H_W=noise_x_batched,
@@ -445,8 +454,8 @@ class ControlVideo2WorldModelRectifiedFlow(Video2WorldModelRectifiedFlow):
                 latent_control_input=latent_control_batched,
                 condition_video_input_mask_B_C_T_H_W=mask_batched,
                 fps=fps_batched,
-                padding_mask=cond_dict.get("padding_mask"),
-                data_type=cond_dict.get("data_type"),
+                padding_mask=padding_mask_batched,
+                data_type=cond_dict.get("data_type"),  # This is an enum, not a tensor
                 img_context_emb=img_context_batched,
                 control_context_scale=control_scale,
                 precomputed_hints=(hints_batched, control_scale),
