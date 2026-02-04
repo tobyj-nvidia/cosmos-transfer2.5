@@ -429,6 +429,14 @@ class ControlVideo2WorldModelRectifiedFlow(Video2WorldModelRectifiedFlow):
             fps_cond = cond_dict.get("fps")
             fps_batched = torch.cat([fps_cond, fps_cond], dim=0) if fps_cond is not None else None
             
+            # Stack img_context_emb if present
+            img_context_cond = cond_dict.get("img_context_emb")
+            img_context_uncond = uncond_dict.get("img_context_emb")
+            if img_context_cond is not None and img_context_uncond is not None:
+                img_context_batched = torch.cat([img_context_cond, img_context_uncond], dim=0)
+            else:
+                img_context_batched = img_context_cond  # Will be None if not present
+            
             # Step 3: Single batched forward pass through DiT (with precomputed hints)
             both_v = self.net(
                 x_B_C_T_H_W=noise_x_batched,
@@ -439,7 +447,7 @@ class ControlVideo2WorldModelRectifiedFlow(Video2WorldModelRectifiedFlow):
                 fps=fps_batched,
                 padding_mask=cond_dict.get("padding_mask"),
                 data_type=cond_dict.get("data_type"),
-                img_context_emb=cond_dict.get("img_context_emb"),
+                img_context_emb=img_context_batched,
                 control_context_scale=control_scale,
                 precomputed_hints=(hints_batched, control_scale),
             ).float()
