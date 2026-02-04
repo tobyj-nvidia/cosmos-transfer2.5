@@ -39,7 +39,7 @@ nsys profile \
     --cuda-memory-usage=true \
     --stats=true \
     /home/horde/cosmos/cosmos-transfer2.5/.venv/bin/python \
-    tests/test_cfg_optimization_local.py \
+    tests/test_cfg_optimization_nvtx_v3.py \
     --depth-video "$DEPTH_VIDEO" \
     --output-dir "$OUTPUT_DIR/comparison_run" \
     --state-t $STATE_T \
