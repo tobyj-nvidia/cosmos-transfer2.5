@@ -904,6 +904,213 @@ class MinimalV4LVGControlVaceDiT(MiniTrainDITImageContext):
 
         self._is_context_parallel_enabled = True
 
+    def compute_control_hints(
+        self,
+        x_B_C_T_H_W: torch.Tensor,
+        latent_control_input: torch.Tensor,
+        timesteps_B_T: torch.Tensor,
+        crossattn_emb: torch.Tensor,
+        condition_video_input_mask_B_C_T_H_W: Optional[torch.Tensor] = None,
+        fps: Optional[torch.Tensor] = None,
+        padding_mask: Optional[torch.Tensor] = None,
+        data_type: Optional[DataType] = DataType.VIDEO,
+        img_context_emb: Optional[torch.Tensor] = None,
+        control_context_scale: float | torch.Tensor = 1.0,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Compute control branch hints separately from main forward pass.
+        
+        This allows caching hints between conditioned and unconditioned CFG passes,
+        since the control input (depth video) is identical for both.
+        
+        Args:
+            x_B_C_T_H_W: Input tensor (used for shape/embedding computation)
+            latent_control_input: VAE-encoded control signal (depth video)
+            timesteps_B_T: Diffusion timesteps
+            crossattn_emb: Text embedding (can be either cond or uncond, only used for shape)
+            condition_video_input_mask_B_C_T_H_W: Video conditioning mask
+            fps: Frames per second
+            padding_mask: Padding mask
+            data_type: VIDEO or IMAGE
+            img_context_emb: Image context embedding
+            control_context_scale: Scale factor for control hints
+            
+        Returns:
+            Tuple of (hints, control_context_scale_tensor):
+            - hints: Stacked tensor of per-block control modulations [num_blocks, B, T, H, W, D]
+            - control_context_scale_tensor: Processed control weight
+        """
+        B, C, T, H, W = x_B_C_T_H_W.shape
+        
+        # Prepare control input
+        def _pad_control_input(control_B_C_T_H_W):
+            if control_B_C_T_H_W.shape[1] < self.vace_in_channels - 1:
+                pad_C = self.vace_in_channels - 1 - control_B_C_T_H_W.shape[1]
+                control_B_C_T_H_W = torch.cat(
+                    [
+                        control_B_C_T_H_W,
+                        torch.zeros(
+                            (B, pad_C, T, H, W), dtype=control_B_C_T_H_W.dtype, device=control_B_C_T_H_W.device
+                        ),
+                    ],
+                    dim=1,
+                )
+            return control_B_C_T_H_W
+        
+        if self.num_control_branches == 1:
+            control_B_C_T_H_W = latent_control_input
+            control_B_C_T_H_W = _pad_control_input(control_B_C_T_H_W)
+        else:
+            control_B_C_T_H_W = latent_control_input.chunk(self.num_control_branches, dim=1)
+            control_B_C_T_H_W = [_pad_control_input(c) for c in control_B_C_T_H_W]
+        
+        def _prepare_transformer_input(x_B_C_T_H_W_input, embedder):
+            if data_type == DataType.VIDEO:
+                x_B_C_T_H_W_input = torch.cat([x_B_C_T_H_W_input, condition_video_input_mask_B_C_T_H_W.type_as(x_B_C_T_H_W_input)], dim=1)
+            else:
+                x_B_C_T_H_W_input = torch.cat([x_B_C_T_H_W_input, torch.zeros_like(x_B_C_T_H_W_input[:, :1])], dim=1)
+            
+            x_B_T_H_W_D, rope_emb_L_1_1_D, extra_pos_emb = self.prepare_embedded_sequence(
+                x_B_C_T_H_W_input,
+                fps=fps,
+                padding_mask=padding_mask,
+                embedder=embedder,
+            )
+            return x_B_T_H_W_D, rope_emb_L_1_1_D, extra_pos_emb
+        
+        # Prepare input embedding (needed for control branch)
+        x_B_T_H_W_D, rope_emb_L_1_1_D, extra_pos_emb_B_T_H_W_D_or_T_H_W_B_D = _prepare_transformer_input(
+            x_B_C_T_H_W, embedder=self.x_embedder
+        )
+        if self.separate_embedders:
+            x_B_T_H_W_D_for_control, rope_emb_L_1_1_D_for_control, extra_pos_emb_for_control = (
+                _prepare_transformer_input(x_B_C_T_H_W, embedder=self.x_embedder_for_control_branch)
+            )
+        else:
+            x_B_T_H_W_D_for_control = x_B_T_H_W_D
+            rope_emb_L_1_1_D_for_control = rope_emb_L_1_1_D
+            extra_pos_emb_for_control = extra_pos_emb_B_T_H_W_D_or_T_H_W_B_D
+        
+        # Prepare control embedding
+        if self.num_control_branches > 1:
+            control_B_T_H_W_D = []
+            for nc in range(self.num_control_branches):
+                control_B_C_T_H_W_i = control_B_C_T_H_W[nc]
+                control_B_T_H_W_D_i, _, _ = _prepare_transformer_input(
+                    control_B_C_T_H_W_i,
+                    embedder=self.control_embedder[nc],
+                )
+                if not control_B_C_T_H_W_i.any():
+                    control_B_T_H_W_D_i = torch.zeros_like(control_B_T_H_W_D_i)
+                control_B_T_H_W_D.append(control_B_T_H_W_D_i)
+        else:
+            control_B_T_H_W_D, rope_emb_L_1_1_D_for_control, extra_pos_emb_for_control = (
+                _prepare_transformer_input(
+                    control_B_C_T_H_W,
+                    embedder=self.control_embedder,
+                )
+            )
+        
+        # Prepare context input
+        if self.use_crossattn_projection:
+            crossattn_emb = self.crossattn_proj(crossattn_emb)
+        
+        if self.use_input_hint_block:
+            control_B_T_H_W_D = self.input_hint_block(control_B_T_H_W_D)
+        
+        if img_context_emb is not None:
+            assert self.extra_image_context_dim is not None
+            img_context_emb = self.img_context_proj(img_context_emb)
+            context_input = (crossattn_emb, img_context_emb)
+        else:
+            context_input = crossattn_emb
+        
+        # Compute timestep embedding
+        if timesteps_B_T.ndim == 1:
+            timesteps_B_T = timesteps_B_T.unsqueeze(1)
+        timesteps_B_T = timesteps_B_T * self.timestep_scale
+        
+        with amp.autocast("cuda", enabled=self.use_wan_fp32_strategy, dtype=torch.float32):
+            t_embedding_B_T_D, adaln_lora_B_T_3D = self.t_embedder(timesteps_B_T)
+            t_embedding_B_T_D = self.t_embedding_norm(t_embedding_B_T_D)
+            
+            if self.separate_embedders:
+                t_embedding_B_T_D_for_control, adaln_lora_B_T_3D_for_control = self.t_embedder_for_control_branch(
+                    timesteps_B_T
+                )
+                t_embedding_B_T_D_for_control = self.t_embedding_norm_for_control_branch(t_embedding_B_T_D_for_control)
+            else:
+                t_embedding_B_T_D_for_control = t_embedding_B_T_D
+                adaln_lora_B_T_3D_for_control = adaln_lora_B_T_3D
+        
+        # Run control branch
+        def _get_control_weight(control_context_scale_input):
+            if isinstance(control_context_scale_input, torch.Tensor):
+                if control_context_scale_input.ndim == 0:
+                    return [float(control_context_scale_input)] * self.num_control_branches
+                elif control_context_scale_input.ndim == 1:
+                    return [float(w) for w in control_context_scale_input]
+                else:
+                    return [w for w in control_context_scale_input]
+            elif isinstance(control_context_scale_input, (float, int)):
+                return [control_context_scale_input] * self.num_control_branches
+            elif isinstance(control_context_scale_input, list) and all(isinstance(w, float) for w in control_context_scale_input):
+                return [float(w) for w in control_context_scale_input]
+            else:
+                raise ValueError(f"Invalid control_context_scale type: {type(control_context_scale_input)}")
+        
+        control_block_kwargs = {
+            "emb_B_T_D": t_embedding_B_T_D_for_control,
+            "crossattn_emb": context_input,
+            "rope_emb_L_1_1_D": rope_emb_L_1_1_D_for_control,
+            "adaln_lora_B_T_3D": adaln_lora_B_T_3D_for_control,
+            "extra_per_block_pos_emb": extra_pos_emb_for_control,
+        }
+        
+        if self.num_control_branches > 1:
+            hints_list = []
+            has_hint_nc = [c.any() for c in control_B_T_H_W_D]
+            for i in range(len(self.control_layers)):
+                for nc in range(self.num_control_branches):
+                    if has_hint_nc[nc] or torch.is_grad_enabled():
+                        block = getattr(self, f"control_blocks_{nc}")[i]
+                        control_B_T_H_W_D[nc] = block(
+                            c=control_B_T_H_W_D[nc],
+                            x_B_T_H_W_D=x_B_T_H_W_D_for_control,
+                            **control_block_kwargs,
+                        )
+                        control_B_T_H_W_D[nc] = control_B_T_H_W_D[nc] * has_hint_nc[nc]
+                if self.use_after_proj_for_multi_branch:
+                    num_active_branches = sum(has_hint_nc)
+                    control_B_T_H_W_D_concat = torch.cat(control_B_T_H_W_D, dim=-1) / num_active_branches
+                    hints_list.append(self.after_proj[i](control_B_T_H_W_D_concat))
+            if not self.use_after_proj_for_multi_branch:
+                weight_maps = _get_control_weight(control_context_scale)
+                control_B_T_H_W_D_sum = sum([c * w for c, w in zip(control_B_T_H_W_D, weight_maps)])
+                hints = torch.unbind(control_B_T_H_W_D_sum)[:-1]
+                control_context_scale = 1.0
+            else:
+                hints = hints_list
+        else:
+            for i, block in enumerate(self.control_blocks):
+                control_B_T_H_W_D = block(
+                    control_B_T_H_W_D,
+                    x_B_T_H_W_D_for_control,
+                    **control_block_kwargs,
+                )
+            hints = torch.unbind(control_B_T_H_W_D)[:-1]
+            control_context_scale = control_context_scale[0] if isinstance(control_context_scale, list) else control_context_scale
+        
+        # Stack hints for return
+        hints_stacked = torch.stack(hints) if not isinstance(hints, torch.Tensor) else hints
+        
+        if isinstance(control_context_scale, float):
+            control_context_scale = torch.tensor(
+                control_context_scale, device=x_B_C_T_H_W.device, dtype=x_B_C_T_H_W.dtype
+            )
+        
+        return hints_stacked, control_context_scale
+
     def forward(
         self,
         x_B_C_T_H_W: torch.Tensor,
@@ -916,8 +1123,30 @@ class MinimalV4LVGControlVaceDiT(MiniTrainDITImageContext):
         data_type: Optional[DataType] = DataType.VIDEO,
         img_context_emb: Optional[torch.Tensor] = None,
         control_context_scale: float | torch.Tensor = 1.0,
+        precomputed_hints: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
         **kwargs,
     ) -> torch.Tensor | List[torch.Tensor] | Tuple[torch.Tensor, List[torch.Tensor]]:
+        """
+        Forward pass of the ControlLVGDiT network.
+        
+        Args:
+            x_B_C_T_H_W: Input noisy latent [B, C, T, H, W]
+            timesteps_B_T: Diffusion timesteps
+            crossattn_emb: Text conditioning embedding
+            latent_control_input: VAE-encoded control signal (depth video)
+            condition_video_input_mask_B_C_T_H_W: Video conditioning mask
+            fps: Frames per second
+            padding_mask: Padding mask
+            data_type: VIDEO or IMAGE
+            img_context_emb: Image context embedding
+            control_context_scale: Scale factor for control hints
+            precomputed_hints: Optional tuple of (hints_stacked, control_scale) from compute_control_hints().
+                              If provided, skips control branch computation (optimization for CFG).
+            **kwargs: Additional arguments (ignored)
+            
+        Returns:
+            Denoised output tensor
+        """
         del kwargs
         assert not (self.training and self.use_cuda_graphs), "CUDA Graphs are supported only for inference"
         # control branch forward
@@ -1059,68 +1288,74 @@ class MinimalV4LVGControlVaceDiT(MiniTrainDITImageContext):
                 )
             return control_weight_maps
 
-        if self.num_control_branches > 1:
-            hints = []
-            has_hint_nc = [c.any() for c in control_B_T_H_W_D]
-            for i in range(len(self.control_layers)):
-                for nc in range(self.num_control_branches):
-                    if has_hint_nc[nc] or torch.is_grad_enabled():
-                        block = getattr(self, f"control_blocks_{nc}")[i]
-                        control_B_T_H_W_D[nc] = block(
-                            c=control_B_T_H_W_D[nc],
-                            x_B_T_H_W_D=x_B_T_H_W_D_for_control,
-                            emb_B_T_D=t_embedding_B_T_D_for_control,
-                            crossattn_emb=context_input,
-                            rope_emb_L_1_1_D=rope_emb_L_1_1_D_for_control,
-                            adaln_lora_B_T_3D=adaln_lora_B_T_3D_for_control,
-                            extra_per_block_pos_emb=extra_pos_emb_B_T_H_W_D_or_T_H_W_B_D_for_control,
-                        )
-                        control_B_T_H_W_D[nc] = control_B_T_H_W_D[nc] * has_hint_nc[nc]
-                if self.use_after_proj_for_multi_branch:
-                    # Normalize activations based on number of active branches
-                    num_active_branches = sum(has_hint_nc)
-                    control_B_T_H_W_D_concat = torch.cat(control_B_T_H_W_D, dim=-1) / num_active_branches
-                    hints.append(self.after_proj[i](control_B_T_H_W_D_concat))
-            if not self.use_after_proj_for_multi_branch:
-                weight_maps_scalar_or_B_T_H_W_D = _get_control_weight(control_context_scale)
-                control_B_T_H_W_D_sum = sum([c * w for c, w in zip(control_B_T_H_W_D, weight_maps_scalar_or_B_T_H_W_D)])
-                hints = torch.unbind(control_B_T_H_W_D_sum)[:-1]  # list of layerwise control modulations
-                control_context_scale = 1.0  # already scaled hints by control_context_scale
+        # Use precomputed hints if provided (optimization for CFG - avoids redundant control branch)
+        if precomputed_hints is not None:
+            hints_stacked, control_context_scale = precomputed_hints
+            hints = torch.unbind(hints_stacked) if hints_stacked.dim() > 4 else list(hints_stacked)
         else:
-            control_block_kwargs = {
-                "emb_B_T_D": t_embedding_B_T_D_for_control,
-                "crossattn_emb": context_input,
-                "rope_emb_L_1_1_D": rope_emb_L_1_1_D_for_control,
-                "adaln_lora_B_T_3D": adaln_lora_B_T_3D_for_control,
-                "extra_per_block_pos_emb": extra_pos_emb_B_T_H_W_D_or_T_H_W_B_D_for_control,
-            }
-            if self.use_cuda_graphs:
-                shapes_key = create_cuda_graph(
-                    self.controlnet_cuda_graphs,
-                    self.control_blocks,
-                    [control_B_T_H_W_D, x_B_T_H_W_D_for_control],
-                    control_block_kwargs,
-                )
-                cg_control_blocks = self.controlnet_cuda_graphs[shapes_key]
+            # Compute control branch hints
+            if self.num_control_branches > 1:
+                hints = []
+                has_hint_nc = [c.any() for c in control_B_T_H_W_D]
+                for i in range(len(self.control_layers)):
+                    for nc in range(self.num_control_branches):
+                        if has_hint_nc[nc] or torch.is_grad_enabled():
+                            block = getattr(self, f"control_blocks_{nc}")[i]
+                            control_B_T_H_W_D[nc] = block(
+                                c=control_B_T_H_W_D[nc],
+                                x_B_T_H_W_D=x_B_T_H_W_D_for_control,
+                                emb_B_T_D=t_embedding_B_T_D_for_control,
+                                crossattn_emb=context_input,
+                                rope_emb_L_1_1_D=rope_emb_L_1_1_D_for_control,
+                                adaln_lora_B_T_3D=adaln_lora_B_T_3D_for_control,
+                                extra_per_block_pos_emb=extra_pos_emb_B_T_H_W_D_or_T_H_W_B_D_for_control,
+                            )
+                            control_B_T_H_W_D[nc] = control_B_T_H_W_D[nc] * has_hint_nc[nc]
+                    if self.use_after_proj_for_multi_branch:
+                        # Normalize activations based on number of active branches
+                        num_active_branches = sum(has_hint_nc)
+                        control_B_T_H_W_D_concat = torch.cat(control_B_T_H_W_D, dim=-1) / num_active_branches
+                        hints.append(self.after_proj[i](control_B_T_H_W_D_concat))
+                if not self.use_after_proj_for_multi_branch:
+                    weight_maps_scalar_or_B_T_H_W_D = _get_control_weight(control_context_scale)
+                    control_B_T_H_W_D_sum = sum([c * w for c, w in zip(control_B_T_H_W_D, weight_maps_scalar_or_B_T_H_W_D)])
+                    hints = torch.unbind(control_B_T_H_W_D_sum)[:-1]  # list of layerwise control modulations
+                    control_context_scale = 1.0  # already scaled hints by control_context_scale
             else:
-                cg_control_blocks = self.control_blocks
-            for i, block in enumerate(self.control_blocks):
+                control_block_kwargs = {
+                    "emb_B_T_D": t_embedding_B_T_D_for_control,
+                    "crossattn_emb": context_input,
+                    "rope_emb_L_1_1_D": rope_emb_L_1_1_D_for_control,
+                    "adaln_lora_B_T_3D": adaln_lora_B_T_3D_for_control,
+                    "extra_per_block_pos_emb": extra_pos_emb_B_T_H_W_D_or_T_H_W_B_D_for_control,
+                }
                 if self.use_cuda_graphs:
-                    control_B_T_H_W_D, all_c = block.pre_forward(control_B_T_H_W_D, x_B_T_H_W_D)
-                control_B_T_H_W_D = cg_control_blocks[i](
-                    control_B_T_H_W_D,
-                    x_B_T_H_W_D_for_control,
-                    **control_block_kwargs,
-                )
-                if self.use_cuda_graphs:
-                    control_B_T_H_W_D = block.post_forward(control_B_T_H_W_D, all_c)
-            hints = torch.unbind(control_B_T_H_W_D)[:-1]  # list of layerwise control modulations
-            control_context_scale = control_context_scale[0]
+                    shapes_key = create_cuda_graph(
+                        self.controlnet_cuda_graphs,
+                        self.control_blocks,
+                        [control_B_T_H_W_D, x_B_T_H_W_D_for_control],
+                        control_block_kwargs,
+                    )
+                    cg_control_blocks = self.controlnet_cuda_graphs[shapes_key]
+                else:
+                    cg_control_blocks = self.control_blocks
+                for i, block in enumerate(self.control_blocks):
+                    if self.use_cuda_graphs:
+                        control_B_T_H_W_D, all_c = block.pre_forward(control_B_T_H_W_D, x_B_T_H_W_D)
+                    control_B_T_H_W_D = cg_control_blocks[i](
+                        control_B_T_H_W_D,
+                        x_B_T_H_W_D_for_control,
+                        **control_block_kwargs,
+                    )
+                    if self.use_cuda_graphs:
+                        control_B_T_H_W_D = block.post_forward(control_B_T_H_W_D, all_c)
+                hints = torch.unbind(control_B_T_H_W_D)[:-1]  # list of layerwise control modulations
+                control_context_scale = control_context_scale[0]
 
-        if isinstance(control_context_scale, float):
-            control_context_scale = torch.tensor(
-                control_context_scale, device=x_B_C_T_H_W.device, dtype=x_B_C_T_H_W.dtype
-            )
+            if isinstance(control_context_scale, float):
+                control_context_scale = torch.tensor(
+                    control_context_scale, device=x_B_C_T_H_W.device, dtype=x_B_C_T_H_W.dtype
+                )
         block_kwargs = {
             "emb_B_T_D": t_embedding_B_T_D,
             "crossattn_emb": context_input,

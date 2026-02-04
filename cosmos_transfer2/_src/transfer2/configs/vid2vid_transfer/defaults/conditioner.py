@@ -109,6 +109,8 @@ class ControlVideo2WorldCondition(Video2WorldCondition):
 class ControlVideo2WorldConditionV2(Video2WorldConditionV2):
     control_input: Optional[torch.Tensor] = None
     latent_control_input: Optional[torch.Tensor] = None
+    # Precomputed control hints for CFG optimization (avoids redundant control branch computation)
+    precomputed_hints: Optional[Tuple[torch.Tensor, torch.Tensor]] = None
 
     def set_control_condition(
         self, latent_control_input: torch.Tensor, control_weight: float = 1.0
@@ -116,6 +118,26 @@ class ControlVideo2WorldConditionV2(Video2WorldConditionV2):
         kwargs = self.to_dict(skip_underscore=False)
         kwargs["latent_control_input"] = latent_control_input
         kwargs["control_context_scale"] = control_weight
+        return type(self)(**kwargs)
+
+    def set_precomputed_hints(
+        self, hints: torch.Tensor, control_scale: torch.Tensor
+    ) -> "ControlVideo2WorldConditionV2":
+        """
+        Set precomputed control hints for CFG optimization.
+        
+        This allows caching hints between conditioned and unconditioned passes,
+        since the depth input is identical for both.
+        
+        Args:
+            hints: Stacked hint tensors from compute_control_hints()
+            control_scale: Control scale tensor from compute_control_hints()
+            
+        Returns:
+            New condition with precomputed_hints set
+        """
+        kwargs = self.to_dict(skip_underscore=False)
+        kwargs["precomputed_hints"] = (hints, control_scale)
         return type(self)(**kwargs)
 
     def broadcast(self, process_group: torch.distributed.ProcessGroup) -> "ControlVideo2WorldConditionV2":
