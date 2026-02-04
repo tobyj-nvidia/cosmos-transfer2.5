@@ -21,18 +21,9 @@ from pathlib import Path
 # Add scripts directory to path to import nvtx_profiling_v3
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 
-print("=" * 70)
-print("Applying NVTX v3 profiling patches...")
-print("=" * 70)
-
-# Import and apply all NVTX patches
-from nvtx_profiling_v3 import apply_all_patches
+# Import and apply CFG-specific NVTX patches
+from nvtx_profiling_cfg import apply_all_patches
 apply_all_patches()
-
-print("\n" + "=" * 70)
-print("NVTX patches applied successfully")
-print("=" * 70)
-print()
 
 # Now import and run the actual test
 from test_cfg_optimization_local import main
