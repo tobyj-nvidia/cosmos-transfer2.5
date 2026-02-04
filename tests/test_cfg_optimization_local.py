@@ -169,18 +169,31 @@ def main():
     print(f"Model initialized in {init_time:.2f}s")
     print()
     
-    # Warmup run
+    # Warmup both sequential and batched CFG modes (to trigger JIT compilation)
     if args.profile:
         torch.cuda.nvtx.range_push("WARMUP")
     
-    print("Running warmup...")
-    warmup_sample = create_sample("warmup", seed=999)
+    print("Running warmup for sequential CFG...")
+    inference.use_cfg_batching = False
+    inference.inference_pipeline.use_cfg_batching = False
+    warmup_sample_seq = create_sample("warmup_sequential", seed=999)
     _ = inference.generate(
-        samples=[warmup_sample],
-        output_dir=output_path / "warmup"
+        samples=[warmup_sample_seq],
+        output_dir=output_path / "warmup_sequential"
     )
     torch.cuda.synchronize()
-    print("Warmup complete")
+    print("Sequential CFG warmup complete")
+    
+    print("Running warmup for batched CFG...")
+    inference.use_cfg_batching = True
+    inference.inference_pipeline.use_cfg_batching = True
+    warmup_sample_batch = create_sample("warmup_batched", seed=998)
+    _ = inference.generate(
+        samples=[warmup_sample_batch],
+        output_dir=output_path / "warmup_batched"
+    )
+    torch.cuda.synchronize()
+    print("Batched CFG warmup complete")
     print()
     
     if args.profile:
