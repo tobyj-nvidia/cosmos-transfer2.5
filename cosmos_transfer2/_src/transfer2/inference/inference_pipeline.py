@@ -69,6 +69,8 @@ class ControlVideo2WorldInference:
         use_cuda_graphs: bool = False,
         cfg_parallel: bool = False,
         hierarchical_cp: bool = False,
+        use_fp8: bool = False,
+        fp8_recipe: Optional = None,
     ):
         """
         Initializes the ControlVideo2WorldInference class.
@@ -95,6 +97,8 @@ class ControlVideo2WorldInference:
         self.s3_credential_path = s3_credential_path
         self.cache_dir = cache_dir
         self.cache_text_encoder = cache_text_encoder
+        self.use_fp8 = use_fp8
+        self.fp8_recipe = fp8_recipe
         if exp_override_opts is None:
             exp_override_opts = []
         # no need to load base model separately at inference
@@ -105,20 +109,38 @@ class ControlVideo2WorldInference:
             exp_override_opts.append("~data_train")
         if hierarchical_cp:
             exp_override_opts.append("model.config.net.atten_backend='transformer_engine'")
-        # Load the model and config. Each trained model's config is composed by
-        # loading a pre-registered experiment config, and then (optionally) overriding with some command-line
-        # arguments. That is done in experiment_list.py. Here we simply replicate that process.
-        model, config = load_model_from_checkpoint(
-            experiment_name=self.registered_exp_name,
-            s3_checkpoint_dir=self.checkpoint_path,
-            config_file="cosmos_transfer2/_src/transfer2/configs/vid2vid_transfer/config.py",
-            load_ema_to_reg=True,
-            local_cache_dir=(
-                cache_dir if not checkpoint_paths else None
-            ),  # for multi-control models, need to load other branches before caching
-            experiment_opts=exp_override_opts,
-            cache_text_encoder=self.cache_text_encoder,
-        )
+        
+        # Enable FP8 if requested (must be done BEFORE model loading)
+        if self.use_fp8:
+            log.info("Enabling FP8 for model initialization (Blackwell GPU detected)")
+            # Wrap model loading with FP8 context
+            with fp8_utils.fp8_autocast(enabled=True, fp8_recipe=self.fp8_recipe):
+                model, config = load_model_from_checkpoint(
+                    experiment_name=self.registered_exp_name,
+                    s3_checkpoint_dir=self.checkpoint_path,
+                    config_file="cosmos_transfer2/_src/transfer2/configs/vid2vid_transfer/config.py",
+                    load_ema_to_reg=True,
+                    local_cache_dir=(
+                        cache_dir if not checkpoint_paths else None
+                    ),  # for multi-control models, need to load other branches before caching
+                    experiment_opts=exp_override_opts,
+                    cache_text_encoder=self.cache_text_encoder,
+                )
+        else:
+            # Load the model and config. Each trained model's config is composed by
+            # loading a pre-registered experiment config, and then (optionally) overriding with some command-line
+            # arguments. That is done in experiment_list.py. Here we simply replicate that process.
+            model, config = load_model_from_checkpoint(
+                experiment_name=self.registered_exp_name,
+                s3_checkpoint_dir=self.checkpoint_path,
+                config_file="cosmos_transfer2/_src/transfer2/configs/vid2vid_transfer/config.py",
+                load_ema_to_reg=True,
+                local_cache_dir=(
+                    cache_dir if not checkpoint_paths else None
+                ),  # for multi-control models, need to load other branches before caching
+                experiment_opts=exp_override_opts,
+                cache_text_encoder=self.cache_text_encoder,
+            )
         if (
             isinstance(checkpoint_paths, list) and len(checkpoint_paths) > 1 and not skip_load_model
         ):  # load other branches for multi-control models
@@ -553,10 +575,7 @@ class ControlVideo2WorldInference:
                 torch.cuda.nvtx.range_push("DIFFUSION_MODEL")
                 
                 # Wrap with FP8 context if enabled
-                use_fp8 = getattr(self, 'use_fp8', False)
-                fp8_recipe = getattr(self, 'fp8_recipe', None)
-                
-                with fp8_utils.fp8_autocast(enabled=use_fp8, fp8_recipe=fp8_recipe):
+                with fp8_utils.fp8_autocast(enabled=self.use_fp8, fp8_recipe=self.fp8_recipe):
                     if distillation == "dmd2":
                         log.info("Generating samples using DMD2 distillation...")
                         sample = self.model.generate_samples_from_batch_dmd2(
@@ -863,10 +882,7 @@ class ControlVideo2WorldInference:
         random.seed(seed)
 
         # Wrap with FP8 context if enabled
-        use_fp8 = getattr(self, 'use_fp8', False)
-        fp8_recipe = getattr(self, 'fp8_recipe', None)
-        
-        with fp8_utils.fp8_autocast(enabled=use_fp8, fp8_recipe=fp8_recipe):
+        with fp8_utils.fp8_autocast(enabled=self.use_fp8, fp8_recipe=self.fp8_recipe):
             sample = self.model.generate_samples_from_batch(
                 data_batch,
                 n_sample=None,  # Auto-detect from data_batch

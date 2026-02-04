@@ -141,6 +141,7 @@ class Control2WorldInference:
             log.info(f"Overriding state_t to {state_t} (pixel frames: {(state_t - 1) * 4 + 1})")
         
         # Initialize the inference class
+        # Note: Must pass FP8 params as constructor args so they're available during __init__
         self.inference_pipeline = ControlVideo2WorldInference(
             registered_exp_name=EXPERIMENTS[self.experiment].registered_exp_name,
             checkpoint_paths=self.checkpoint_list,
@@ -151,12 +152,11 @@ class Control2WorldInference:
             wan_cp_grid=args.parallel_tokenizer_grid,
             benchmark_timer=self.benchmark_timer if args.benchmark else None,
             use_cuda_graphs=use_cuda_graphs,
+            use_fp8=self.use_fp8,  # Pass FP8 params for model init
+            fp8_recipe=self.fp8_recipe,
         )
         # Set CFG batching optimization flag on pipeline
         self.inference_pipeline.use_cfg_batching = self.use_cfg_batching
-        # Set FP8 parameters on pipeline
-        self.inference_pipeline.use_fp8 = self.use_fp8
-        self.inference_pipeline.fp8_recipe = self.fp8_recipe
         
         if use_cuda_graphs:
             log.info("CUDA Graphs enabled - kernel launches will be captured and replayed")
