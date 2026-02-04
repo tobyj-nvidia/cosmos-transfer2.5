@@ -557,7 +557,7 @@ class Text2WorldModelRectifiedFlow(ImaginaireModel):
 
         timesteps = self.sample_scheduler.timesteps
 
-        velocity_fn = self.get_velocity_fn_from_batch(data_batch, guidance, is_negative_prompt=is_negative_prompt)
+        velocity_fn = self.get_velocity_fn_from_batch(data_batch, guidance, is_negative_prompt=is_negative_prompt, **kwargs)
         use_spatial_split = False
         if self.net.is_context_parallel_enabled:
             cp_size = len(torch.distributed.get_process_group_ranks(self.get_context_parallel_group()))
@@ -668,7 +668,7 @@ class Text2WorldModelRectifiedFlow(ImaginaireModel):
 
         timesteps = self.sample_scheduler.timesteps
 
-        velocity_fn = self.get_velocity_fn_from_batch(data_batch, guidance, is_negative_prompt=is_negative_prompt)
+        velocity_fn = self.get_velocity_fn_from_batch(data_batch, guidance, is_negative_prompt=is_negative_prompt, **kwargs)
         use_spatial_split = False
         if self.net.is_context_parallel_enabled:
             cp_size = len(torch.distributed.get_process_group_ranks(self.get_context_parallel_group()))

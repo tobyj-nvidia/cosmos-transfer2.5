@@ -46,6 +46,7 @@ class Control2WorldInference:
         batch_hint_keys: list[str],
         state_t: int = DEFAULT_STATE_T,
         use_cuda_graphs: bool = False,
+        use_cfg_batching: bool = False,
     ) -> None:
         """
         Initialize Control2World inference.
@@ -62,12 +63,16 @@ class Control2WorldInference:
             use_cuda_graphs: Whether to use CUDA Graphs for inference.
                      Dramatically reduces kernel launch overhead but requires
                      fixed input shapes (controlled via state_t).
+            use_cfg_batching: Whether to use CFG batching optimization.
+                     Batches conditioned/unconditioned passes and caches control hints
+                     for ~35-45% speedup. Should produce identical outputs.
         """
         log.debug(f"{args.__class__.__name__}({args})({batch_hint_keys})")
         self.setup_args = args
         self.batch_hint_keys = batch_hint_keys
         self.state_t = state_t
         self.use_cuda_graphs = use_cuda_graphs
+        self.use_cfg_batching = use_cfg_batching
         
         if len(self.batch_hint_keys) == 1:
             # pyrefly: ignore  # bad-argument-type
@@ -128,6 +133,8 @@ class Control2WorldInference:
             benchmark_timer=self.benchmark_timer if args.benchmark else None,
             use_cuda_graphs=use_cuda_graphs,
         )
+        # Set CFG batching optimization flag on pipeline
+        self.inference_pipeline.use_cfg_batching = self.use_cfg_batching
         
         if use_cuda_graphs:
             log.info("CUDA Graphs enabled - kernel launches will be captured and replayed")

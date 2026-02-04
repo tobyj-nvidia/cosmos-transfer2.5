@@ -569,6 +569,7 @@ class ControlVideo2WorldInference:
                         x_sigma_max=x_sigma_max,
                         sigma_max=sigma_max,
                         num_steps=num_steps,
+                        use_cfg_batching=getattr(self, 'use_cfg_batching', False),  # Pass CFG optimization flag if set
                     )
                 torch.cuda.nvtx.range_pop()
                 torch.cuda.nvtx.range_push("VAE_DECODE")
@@ -860,6 +861,7 @@ class ControlVideo2WorldInference:
             seed=seed,
             is_negative_prompt=negative_prompts[0] is not None,
             num_steps=num_steps,
+            use_cfg_batching=getattr(self, 'use_cfg_batching', False),  # Pass CFG optimization flag if set
         )
         torch.cuda.nvtx.range_pop()
 
