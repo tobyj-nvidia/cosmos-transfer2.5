@@ -71,6 +71,7 @@ def fp8_autocast(
     """
     if not enabled or not HAS_TE:
         # No-op context if FP8 disabled or TE not available
+        print(f"[FP8] Autocast disabled or TE not available (enabled={enabled}, HAS_TE={HAS_TE})")
         yield
         return
     
@@ -78,13 +79,17 @@ def fp8_autocast(
     if fp8_recipe is None:
         fp8_recipe = create_fp8_recipe()
     
+    print(f"[FP8] Enabling FP8 autocast with recipe: {fp8_recipe}")
+    
     # Use Transformer Engine's FP8 autocast
     with te.fp8_autocast(
         enabled=True,
         fp8_recipe=fp8_recipe,
         fp8_group=fp8_group,
     ):
+        print("[FP8] Inside FP8 autocast context")
         yield
+        print("[FP8] Exiting FP8 autocast context")
 
 
 def is_fp8_available() -> bool:
