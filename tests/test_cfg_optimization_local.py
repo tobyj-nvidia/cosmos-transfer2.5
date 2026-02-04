@@ -15,19 +15,48 @@ Test Strategy:
 Usage:
     cd /home/tobyj/code/notes/daily-notes/src/reference/dex/experiments/octi/cosmos-transfer2.5
     source .venv/bin/activate
+    
+    # Test 1: With 5-frame input (state_t=2, fast):
+    python tests/test_cfg_optimization_local.py \
+        --depth-video /home/tobyj/code/isaaclab-cosmos-experiments/results/test_inputs_5frame/depth_5frame_000.mp4 \
+        --output-dir ./cfg_opt_test_5frame \
+        --state-t 2 \
+        --seed 42 \
+        --num-steps 4
+    
+    # Test 2: With 93-frame input (state_t=24, default Cosmos Transfer size):
     python tests/test_cfg_optimization_local.py \
         --depth-video /home/tobyj/code/isaaclab-cosmos-experiments/results/batch_test_fix_verification/batch_sample_1_control_depth.mp4 \
-        --output-dir ./cfg_opt_test \
+        --output-dir ./cfg_opt_test_93frame \
+        --state-t 24 \
         --seed 42 \
-        --num-runs 3
+        --num-steps 35
+
+Note: --num-steps controls diffusion sampling steps (4 is fast, 35 is high quality)
 """
 
 import argparse
+import subprocess
 import sys
 import time
 from pathlib import Path
 
 import torch
+
+
+def get_video_frame_count(video_path: str) -> int:
+    """Get the total number of frames in a video using ffprobe."""
+    cmd = [
+        "ffprobe",
+        "-v", "error",
+        "-select_streams", "v:0",
+        "-count_packets",
+        "-show_entries", "stream=nb_read_packets",
+        "-of", "csv=p=0",
+        str(video_path)
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+    return int(result.stdout.strip())
 
 
 def main():
@@ -40,11 +69,11 @@ def main():
                         default="A high quality video of a robot in a warehouse",
                         help="Text prompt")
     parser.add_argument("--num-steps", type=int, default=4,
-                        help="Number of diffusion steps")
+                        help="Number of diffusion sampling steps (4=fast, 35=high quality)")
     parser.add_argument("--num-runs", type=int, default=3,
                         help="Number of runs for timing (best of N)")
     parser.add_argument("--state-t", type=int, default=2,
-                        help="Number of latent temporal frames")
+                        help="Number of latent temporal frames (2→5 frames, 24→93 frames)")
     parser.add_argument("--seed", type=int, default=42,
                         help="Random seed for reproducibility")
     
@@ -56,9 +85,36 @@ def main():
     print(f"Depth video: {args.depth_video}")
     print(f"Output dir: {args.output_dir}")
     print(f"Prompt: {args.prompt}")
-    print(f"Diffusion steps: {args.num_steps}")
-    print(f"State_t: {args.state_t}")
+    print(f"Diffusion steps: {args.num_steps} (configurable via --num-steps)")
+    print(f"State_t: {args.state_t} → {(args.state_t - 1) * 4 + 1} pixel frames expected")
     print(f"Seed: {args.seed}")
+    print()
+    
+    # Validate input video has correct number of frames
+    print("Validating input video...")
+    expected_pixel_frames = (args.state_t - 1) * 4 + 1
+    actual_frames = get_video_frame_count(args.depth_video)
+    print(f"  Input video has {actual_frames} frames")
+    print(f"  Expected {expected_pixel_frames} frames for state_t={args.state_t}")
+    
+    if actual_frames != expected_pixel_frames:
+        print()
+        print(f"ERROR: Frame count mismatch!")
+        print(f"  Input video: {actual_frames} frames")
+        print(f"  Expected:    {expected_pixel_frames} frames")
+        print()
+        print("Suggestions:")
+        if actual_frames == 93:
+            print(f"  - For 93-frame videos, use --state-t 24 (default Cosmos Transfer size)")
+        elif actual_frames == 5:
+            print(f"  - For 5-frame videos, use --state-t 2")
+        else:
+            # Calculate correct state_t
+            correct_state_t = (actual_frames - 1) // 4 + 1
+            print(f"  - For {actual_frames}-frame videos, try --state-t {correct_state_t}")
+        print(f"  - Or create a {expected_pixel_frames}-frame video using scripts/extract_rolling_frames.py")
+        sys.exit(1)
+    print("  ✓ Frame count matches expected")
     print()
     
     # Import cosmos modules
@@ -77,9 +133,10 @@ def main():
         disable_guardrails=True,
     )
     
-    # Expected pixel frames (state_t * temporal_compression_factor)
+    # Expected pixel frames: (state_t - 1) * temporal_compression_factor + 1
     # For Cosmos Transfer 2.5, temporal_compression_factor = 4
-    expected_pixel_frames = args.state_t * 4 + 1  # +1 for conditioning frame
+    # Example: state_t=2 → (2-1)*4+1 = 5 frames
+    expected_pixel_frames = (args.state_t - 1) * 4 + 1
     
     # Helper to create sample config with specific seed
     def create_sample(name: str, seed: int) -> InferenceArguments:
