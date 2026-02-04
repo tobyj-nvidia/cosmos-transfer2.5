@@ -175,6 +175,27 @@ def main():
     print()
     
     # =================================================================
+    # Monkey-patch to capture diffusion-only timing
+    # =================================================================
+    from cosmos_transfer2._src.predict2.models import text2world_model_rectified_flow
+    original_generate = text2world_model_rectified_flow.Text2WorldModel.generate_samples_from_batch
+    
+    diffusion_times = {"sequential": [], "batched": []}
+    current_mode = [None]  # Use list to allow modification in nested function
+    
+    def timed_generate(self, *args, **kwargs):
+        torch.cuda.synchronize()
+        start = time.perf_counter()
+        result = original_generate(self, *args, **kwargs)
+        torch.cuda.synchronize()
+        elapsed = time.perf_counter() - start
+        if current_mode[0]:
+            diffusion_times[current_mode[0]].append(elapsed)
+        return result
+    
+    text2world_model_rectified_flow.Text2WorldModel.generate_samples_from_batch = timed_generate
+    
+    # =================================================================
     # Test 1: Original sequential CFG (use_cfg_batching=False)
     # =================================================================
     print("="*70)
@@ -184,6 +205,7 @@ def main():
     # Disable CFG batching optimization
     inference.use_cfg_batching = False
     inference.inference_pipeline.use_cfg_batching = False
+    current_mode[0] = "sequential"
     
     sequential_times = []
     for run in range(args.num_runs):
@@ -203,7 +225,8 @@ def main():
         torch.cuda.synchronize()
         elapsed = time.perf_counter() - start
         sequential_times.append(elapsed)
-        print(f"  Run {run+1}/{args.num_runs} (seed={run_seed}): {elapsed:.3f}s")
+        diffusion_time = diffusion_times["sequential"][-1]
+        print(f"  Run {run+1}/{args.num_runs} (seed={run_seed}): {elapsed:.3f}s total, {diffusion_time:.3f}s diffusion")
     
     best_sequential = min(sequential_times)
     avg_sequential = sum(sequential_times) / len(sequential_times)
@@ -222,6 +245,7 @@ def main():
     # Enable CFG batching optimization
     inference.use_cfg_batching = True
     inference.inference_pipeline.use_cfg_batching = True
+    current_mode[0] = "batched"
     
     batched_times = []
     for run in range(args.num_runs):
@@ -241,7 +265,8 @@ def main():
         torch.cuda.synchronize()
         elapsed = time.perf_counter() - start
         batched_times.append(elapsed)
-        print(f"  Run {run+1}/{args.num_runs} (seed={run_seed}): {elapsed:.3f}s")
+        diffusion_time = diffusion_times["batched"][-1]
+        print(f"  Run {run+1}/{args.num_runs} (seed={run_seed}): {elapsed:.3f}s total, {diffusion_time:.3f}s diffusion")
     
     best_batched = min(batched_times)
     avg_batched = sum(batched_times) / len(batched_times)
@@ -257,18 +282,35 @@ def main():
     print("Performance Comparison")
     print("="*70)
     
+    # Total end-to-end timing
     speedup_best = (best_sequential / best_batched - 1) * 100
     speedup_avg = (avg_sequential / avg_batched - 1) * 100
     
-    print(f"Sequential (original):  {best_sequential:.3f}s (best), {avg_sequential:.3f}s (avg)")
-    print(f"Batched (optimized):    {best_batched:.3f}s (best), {avg_batched:.3f}s (avg)")
-    print(f"Speedup:                {speedup_best:+.1f}% (best), {speedup_avg:+.1f}% (avg)")
+    print("End-to-End (total):")
+    print(f"  Sequential (original):  {best_sequential:.3f}s (best), {avg_sequential:.3f}s (avg)")
+    print(f"  Batched (optimized):    {best_batched:.3f}s (best), {avg_batched:.3f}s (avg)")
+    print(f"  Speedup:                {speedup_best:+.1f}% (best), {speedup_avg:+.1f}% (avg)")
     print()
     
-    if speedup_best > 0:
-        print(f"✓ Optimization successful: {speedup_best:.1f}% faster!")
+    # Diffusion-only timing (what we're optimizing)
+    best_seq_diffusion = min(diffusion_times["sequential"])
+    avg_seq_diffusion = sum(diffusion_times["sequential"]) / len(diffusion_times["sequential"])
+    best_batch_diffusion = min(diffusion_times["batched"])
+    avg_batch_diffusion = sum(diffusion_times["batched"]) / len(diffusion_times["batched"])
+    
+    speedup_diffusion_best = (best_seq_diffusion / best_batch_diffusion - 1) * 100
+    speedup_diffusion_avg = (avg_seq_diffusion / avg_batch_diffusion - 1) * 100
+    
+    print("Diffusion Only (optimized part):")
+    print(f"  Sequential (original):  {best_seq_diffusion:.3f}s (best), {avg_seq_diffusion:.3f}s (avg)")
+    print(f"  Batched (optimized):    {best_batch_diffusion:.3f}s (best), {avg_batch_diffusion:.3f}s (avg)")
+    print(f"  Speedup:                {speedup_diffusion_best:+.1f}% (best), {speedup_diffusion_avg:+.1f}% (avg)")
+    print()
+    
+    if speedup_diffusion_best > 0:
+        print(f"✓ CFG optimization successful: {speedup_diffusion_best:.1f}% faster diffusion!")
     else:
-        print(f"⚠ No speedup observed (may be expected for very short sequences)")
+        print(f"⚠ No speedup observed in diffusion (unexpected)")
     print()
     
     # =================================================================
@@ -284,8 +326,8 @@ def main():
     import cv2
     import numpy as np
     
-    seq_video_path = output_path / "sequential_run0" / "sequential_run0_output.mp4"
-    batch_video_path = output_path / "batched_run0" / "batched_run0_output.mp4"
+    seq_video_path = output_path / "sequential_run0" / "sequential_run0.mp4"
+    batch_video_path = output_path / "batched_run0" / "batched_run0.mp4"
     
     if seq_video_path.exists() and batch_video_path.exists():
         cap_seq = cv2.VideoCapture(str(seq_video_path))
@@ -325,10 +367,52 @@ def main():
                 print("✓ Outputs are nearly identical (within tolerance)")
             else:
                 print(f"⚠ Outputs differ more than expected (max diff: {max(max_diffs):.2f})")
+            
+            # Create side-by-side comparison video
+            print()
+            print("Creating visual comparison video...")
+            comparison_path = output_path / "comparison_sequential_vs_batched.mp4"
+            
+            cap_seq = cv2.VideoCapture(str(seq_video_path))
+            cap_batch = cv2.VideoCapture(str(batch_video_path))
+            
+            # Get video properties
+            fps = cap_seq.get(cv2.CAP_PROP_FPS)
+            width = int(cap_seq.get(cv2.CAP_PROP_FRAME_WIDTH))
+            height = int(cap_seq.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            
+            # Create video writer for side-by-side comparison
+            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+            out = cv2.VideoWriter(str(comparison_path), fourcc, fps, (width * 2, height))
+            
+            while True:
+                ret_seq, frame_seq = cap_seq.read()
+                ret_batch, frame_batch = cap_batch.read()
+                
+                if not (ret_seq and ret_batch):
+                    break
+                
+                # Add labels
+                cv2.putText(frame_seq, "Sequential", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 
+                           1, (255, 255, 255), 2, cv2.LINE_AA)
+                cv2.putText(frame_batch, "Batched CFG", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 
+                           1, (255, 255, 255), 2, cv2.LINE_AA)
+                
+                # Concatenate horizontally
+                combined = np.hstack([frame_seq, frame_batch])
+                out.write(combined)
+            
+            cap_seq.release()
+            cap_batch.release()
+            out.release()
+            
+            print(f"✓ Comparison video saved to: {comparison_path}")
         else:
             print("⚠ Could not compare frames")
     else:
         print(f"⚠ Output videos not found for comparison")
+        print(f"  Expected: {seq_video_path}")
+        print(f"  Expected: {batch_video_path}")
     print()
     
     print("="*70)
