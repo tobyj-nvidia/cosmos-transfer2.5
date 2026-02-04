@@ -119,7 +119,7 @@ def main():
     
     # Import cosmos modules
     print("Loading Cosmos modules...")
-    from cosmos_transfer2.config import InferenceArguments, SetupArguments
+    from cosmos_transfer2.config import InferenceArguments, SetupArguments, DepthConfig
     from cosmos_transfer2.inference import Control2WorldInference
     
     # Create output directory
@@ -147,6 +147,7 @@ def main():
             num_video_frames_per_chunk=expected_pixel_frames,
             num_steps=args.num_steps,
             seed=seed,
+            depth=DepthConfig(control_path=args.depth_video),
         )
     
     print(f"\nInitializing model (state_t={args.state_t})...")
