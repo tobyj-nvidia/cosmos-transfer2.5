@@ -37,6 +37,7 @@ from cosmos_transfer2._src.transfer2.inference.utils import (
     reshape_output_video_to_input_resolution,
     uint8_to_normalized_float,
 )
+from cosmos_transfer2._src.transfer2.utils import fp8_utils
 
 
 def _maybe_get_timer(
@@ -550,27 +551,34 @@ class ControlVideo2WorldInference:
                 # Generate and decode video
                 # n_sample=None lets the model auto-detect batch size from data_batch
                 torch.cuda.nvtx.range_push("DIFFUSION_MODEL")
-                if distillation == "dmd2":
-                    log.info("Generating samples using DMD2 distillation...")
-                    sample = self.model.generate_samples_from_batch_dmd2(
-                        data_batch,
-                        n_sample=None,  # Auto-detect from data_batch for batch inference
-                        num_steps=num_steps,
-                        guidance=guidance,
-                        seed=seed,
-                    )
-                else:
-                    sample = self.model.generate_samples_from_batch(
-                        data_batch,
-                        n_sample=None,  # Auto-detect from data_batch for batch inference
-                        guidance=guidance,
-                        seed=seed,
-                        is_negative_prompt=negative_prompt is not None,
-                        x_sigma_max=x_sigma_max,
-                        sigma_max=sigma_max,
-                        num_steps=num_steps,
-                        use_cfg_batching=getattr(self, 'use_cfg_batching', False),  # Pass CFG optimization flag if set
-                    )
+                
+                # Wrap with FP8 context if enabled
+                use_fp8 = getattr(self, 'use_fp8', False)
+                fp8_recipe = getattr(self, 'fp8_recipe', None)
+                
+                with fp8_utils.fp8_autocast(enabled=use_fp8, fp8_recipe=fp8_recipe):
+                    if distillation == "dmd2":
+                        log.info("Generating samples using DMD2 distillation...")
+                        sample = self.model.generate_samples_from_batch_dmd2(
+                            data_batch,
+                            n_sample=None,  # Auto-detect from data_batch for batch inference
+                            num_steps=num_steps,
+                            guidance=guidance,
+                            seed=seed,
+                        )
+                    else:
+                        sample = self.model.generate_samples_from_batch(
+                            data_batch,
+                            n_sample=None,  # Auto-detect from data_batch for batch inference
+                            guidance=guidance,
+                            seed=seed,
+                            is_negative_prompt=negative_prompt is not None,
+                            x_sigma_max=x_sigma_max,
+                            sigma_max=sigma_max,
+                            num_steps=num_steps,
+                            use_cfg_batching=getattr(self, 'use_cfg_batching', False),  # Pass CFG optimization flag if set
+                        )
+                
                 torch.cuda.nvtx.range_pop()
                 torch.cuda.nvtx.range_push("VAE_DECODE")
                 video = self.model.decode(sample)  # Shape: (B, C, T, H, W)
@@ -854,15 +862,21 @@ class ControlVideo2WorldInference:
         seed = seeds[0]
         random.seed(seed)
 
-        sample = self.model.generate_samples_from_batch(
-            data_batch,
-            n_sample=None,  # Auto-detect from data_batch
-            guidance=guidance,
-            seed=seed,
-            is_negative_prompt=negative_prompts[0] is not None,
-            num_steps=num_steps,
-            use_cfg_batching=getattr(self, 'use_cfg_batching', False),  # Pass CFG optimization flag if set
-        )
+        # Wrap with FP8 context if enabled
+        use_fp8 = getattr(self, 'use_fp8', False)
+        fp8_recipe = getattr(self, 'fp8_recipe', None)
+        
+        with fp8_utils.fp8_autocast(enabled=use_fp8, fp8_recipe=fp8_recipe):
+            sample = self.model.generate_samples_from_batch(
+                data_batch,
+                n_sample=None,  # Auto-detect from data_batch
+                guidance=guidance,
+                seed=seed,
+                is_negative_prompt=negative_prompts[0] is not None,
+                num_steps=num_steps,
+                use_cfg_batching=getattr(self, 'use_cfg_batching', False),  # Pass CFG optimization flag if set
+            )
+        
         torch.cuda.nvtx.range_pop()
 
         # Decode batched latents to videos

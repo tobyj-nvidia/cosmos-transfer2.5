@@ -26,6 +26,7 @@ from cosmos_transfer2._src.imaginaire.visualize.video import save_img_or_video
 from cosmos_transfer2._src.transfer2.configs.vid2vid_transfer.experiment.experiment_list import EXPERIMENTS
 from cosmos_transfer2._src.transfer2.inference.inference_pipeline import ControlVideo2WorldInference
 from cosmos_transfer2._src.transfer2.inference.utils import compile_tokenizer_if_enabled
+from cosmos_transfer2._src.transfer2.utils import fp8_utils
 from cosmos_transfer2.config import (
     MODEL_CHECKPOINTS,
     InferenceArguments,
@@ -47,6 +48,7 @@ class Control2WorldInference:
         state_t: int = DEFAULT_STATE_T,
         use_cuda_graphs: bool = False,
         use_cfg_batching: bool = False,
+        use_fp8: bool = False,
     ) -> None:
         """
         Initialize Control2World inference.
@@ -66,6 +68,10 @@ class Control2WorldInference:
             use_cfg_batching: Whether to use CFG batching optimization.
                      Batches conditioned/unconditioned passes and caches control hints
                      for ~35-45% speedup. Should produce identical outputs.
+            use_fp8: Whether to use FP8 precision for inference.
+                     Leverages FP8 Tensor Cores on Blackwell GPUs for ~2x speedup.
+                     Requires Transformer Engine and compute capability >= 8.9.
+                     Falls back to BF16 if not available.
         """
         log.debug(f"{args.__class__.__name__}({args})({batch_hint_keys})")
         self.setup_args = args
@@ -73,6 +79,19 @@ class Control2WorldInference:
         self.state_t = state_t
         self.use_cuda_graphs = use_cuda_graphs
         self.use_cfg_batching = use_cfg_batching
+        self.use_fp8 = use_fp8
+        
+        # Check FP8 availability and create recipe
+        if self.use_fp8:
+            if not fp8_utils.is_fp8_available():
+                log.warning("FP8 requested but not available - falling back to BF16")
+                self.use_fp8 = False
+                self.fp8_recipe = None
+            else:
+                log.info("FP8 inference enabled on Blackwell GPU")
+                self.fp8_recipe = fp8_utils.create_fp8_recipe()
+        else:
+            self.fp8_recipe = None
         
         if len(self.batch_hint_keys) == 1:
             # pyrefly: ignore  # bad-argument-type
@@ -135,6 +154,9 @@ class Control2WorldInference:
         )
         # Set CFG batching optimization flag on pipeline
         self.inference_pipeline.use_cfg_batching = self.use_cfg_batching
+        # Set FP8 parameters on pipeline
+        self.inference_pipeline.use_fp8 = self.use_fp8
+        self.inference_pipeline.fp8_recipe = self.fp8_recipe
         
         if use_cuda_graphs:
             log.info("CUDA Graphs enabled - kernel launches will be captured and replayed")
