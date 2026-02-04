@@ -246,6 +246,7 @@ class ControlVideo2WorldModelRectifiedFlow(Video2WorldModelRectifiedFlow):
         guidance: float = 1.5,
         is_negative_prompt: bool = False,
         use_cfg_batching: bool = False,
+        **kwargs,
     ) -> Callable:
         """
         Generates a callable function `velocity_fn` based on the provided data batch and guidance factor for rectified flow.
@@ -258,6 +259,7 @@ class ControlVideo2WorldModelRectifiedFlow(Video2WorldModelRectifiedFlow):
                              This can provide 35-45% speedup by:
                              1. Computing control branch hints once per step (not twice)
                              2. Running cond and uncond DiT passes in a single batched forward
+            **kwargs: Additional keyword arguments (e.g., x_sigma_max, sigma_max) passed from parent but not used here
         """
         if NUM_CONDITIONAL_FRAMES_KEY in data_batch:
             num_conditional_frames = data_batch[NUM_CONDITIONAL_FRAMES_KEY]
