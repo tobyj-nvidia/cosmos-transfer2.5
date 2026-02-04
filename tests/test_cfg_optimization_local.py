@@ -76,8 +76,14 @@ def main():
                         help="Number of latent temporal frames (2→5 frames, 24→93 frames)")
     parser.add_argument("--seed", type=int, default=42,
                         help="Random seed for reproducibility")
+    parser.add_argument("--profile", action="store_true",
+                        help="Enable NVTX markers for profiling (reduces num_runs to 1)")
     
     args = parser.parse_args()
+    
+    # For profiling, only do 1 run of each to keep the profile clean
+    if args.profile:
+        args.num_runs = 1
     
     print("="*70)
     print("CFG Optimization Test with Real Model")
@@ -163,7 +169,10 @@ def main():
     print(f"Model initialized in {init_time:.2f}s")
     print()
     
-    # Warmup run (use a different seed for warmup)
+    # Warmup run
+    if args.profile:
+        torch.cuda.nvtx.range_push("WARMUP")
+    
     print("Running warmup...")
     warmup_sample = create_sample("warmup", seed=999)
     _ = inference.generate(
@@ -173,6 +182,9 @@ def main():
     torch.cuda.synchronize()
     print("Warmup complete")
     print()
+    
+    if args.profile:
+        torch.cuda.nvtx.range_pop()
     
     # =================================================================
     # Monkey-patch to capture diffusion-only timing
@@ -198,6 +210,9 @@ def main():
     # =================================================================
     # Test 1: Original sequential CFG (use_cfg_batching=False)
     # =================================================================
+    if args.profile:
+        torch.cuda.nvtx.range_push("SEQUENTIAL_CFG_TEST")
+    
     print("="*70)
     print("Test 1: Original Sequential CFG")
     print("="*70)
@@ -235,9 +250,15 @@ def main():
     print(f"  Average: {avg_sequential:.3f}s")
     print()
     
+    if args.profile:
+        torch.cuda.nvtx.range_pop()
+    
     # =================================================================
     # Test 2: Optimized batched CFG (use_cfg_batching=True)
     # =================================================================
+    if args.profile:
+        torch.cuda.nvtx.range_push("BATCHED_CFG_TEST")
+    
     print("="*70)
     print("Test 2: Optimized Batched CFG")
     print("="*70)
@@ -274,6 +295,9 @@ def main():
     print(f"  Best: {best_batched:.3f}s")
     print(f"  Average: {avg_batched:.3f}s")
     print()
+    
+    if args.profile:
+        torch.cuda.nvtx.range_pop()
     
     # =================================================================
     # Compare Results
