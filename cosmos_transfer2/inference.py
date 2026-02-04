@@ -430,6 +430,7 @@ class Control2WorldInference:
 
         # Save video/image
         if self.device_rank == 0:
+            torch.cuda.nvtx.range_push("SAVE_SEQUENTIAL_OUTPUT")
             output_video = (1.0 + output_video[0]) / 2
             for key in control_video_dict:
                 control_video_dict[key] = (1.0 + control_video_dict[key][0]) / 2
@@ -448,6 +449,7 @@ class Control2WorldInference:
                     processed_frames = guardrail_presets.run_video_guardrail(frames, self.video_guardrail_runner)
                     if processed_frames is None:
                         if self.setup_args.keep_going:
+                            torch.cuda.nvtx.range_pop()
                             return None
                         else:
                             raise Exception("Guardrail blocked video2world generation.")
@@ -467,6 +469,7 @@ class Control2WorldInference:
             with open(prompt_save_path, "w") as f:
                 f.write(sample.prompt)
             log.success(f"Generated video saved to {output_path}.{ext}")
+            torch.cuda.nvtx.range_pop()
 
         if sample_id == 0 and self.setup_args.benchmark:
             # discard first warmup sample from timing
