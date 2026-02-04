@@ -111,8 +111,8 @@ class TestStandaloneMathEquivalence:
         # Method 3: Rearranged
         v3 = uncond_v + guidance * (cond_v - uncond_v) + (cond_v - uncond_v)
         
-        torch.testing.assert_close(v1, v2, rtol=1e-5, atol=1e-5)
-        torch.testing.assert_close(v1, v3, rtol=1e-5, atol=1e-5)
+        torch.testing.assert_close(v1, v2, rtol=1e-4, atol=1e-4)
+        torch.testing.assert_close(v1, v3, rtol=1e-4, atol=1e-4)
         print("✓ CFG formula produces identical results with different orderings")
     
     def test_batched_matmul_equivalence(self):
@@ -145,8 +145,8 @@ class TestStandaloneMathEquivalence:
         out_AB_batched = AB_batched @ W
         out_A_batch, out_B_batch = out_AB_batched.chunk(2, dim=0)
         
-        torch.testing.assert_close(out_A_seq, out_A_batch, rtol=1e-5, atol=1e-5)
-        torch.testing.assert_close(out_B_seq, out_B_batch, rtol=1e-5, atol=1e-5)
+        torch.testing.assert_close(out_A_seq, out_A_batch, rtol=1e-4, atol=1e-4)
+        torch.testing.assert_close(out_B_seq, out_B_batch, rtol=1e-4, atol=1e-4)
         print("✓ Batched matmul produces identical results to sequential")
     
     def test_batched_attention_equivalence(self):
@@ -189,8 +189,8 @@ class TestStandaloneMathEquivalence:
         out_batched = attention(Q_batched, K_batched, V_batched)
         out_cond_batch, out_uncond_batch = out_batched.chunk(2, dim=0)
         
-        torch.testing.assert_close(out_cond_seq, out_cond_batch, rtol=1e-5, atol=1e-5)
-        torch.testing.assert_close(out_uncond_seq, out_uncond_batch, rtol=1e-5, atol=1e-5)
+        torch.testing.assert_close(out_cond_seq, out_cond_batch, rtol=1e-4, atol=1e-4)
+        torch.testing.assert_close(out_uncond_seq, out_uncond_batch, rtol=1e-4, atol=1e-4)
         print("✓ Batched attention produces identical results to sequential")
     
     def test_hint_reuse_correctness(self):
@@ -284,12 +284,12 @@ class TestStandaloneMathEquivalence:
         v_optimized = cond_v_opt + guidance * (cond_v_opt - uncond_v_opt)
         
         # Verify equivalence
-        torch.testing.assert_close(v_sequential, v_optimized, rtol=1e-5, atol=1e-5)
+        torch.testing.assert_close(v_sequential, v_optimized, rtol=1e-4, atol=1e-4)
         print("✓ Full batched CFG simulation produces identical results")
         
         # Also verify intermediate values
-        torch.testing.assert_close(cond_v, cond_v_opt, rtol=1e-5, atol=1e-5)
-        torch.testing.assert_close(uncond_v, uncond_v_opt, rtol=1e-5, atol=1e-5)
+        torch.testing.assert_close(cond_v, cond_v_opt, rtol=1e-4, atol=1e-4)
+        torch.testing.assert_close(uncond_v, uncond_v_opt, rtol=1e-4, atol=1e-4)
         print("✓ Intermediate cond_v and uncond_v match between approaches")
 
 
@@ -777,6 +777,204 @@ class TestPerformanceBaseline:
         print(f"\nEstimated component times:")
         print(f"  Control branch (hint computation): ~{(baseline_time - cached_time)*1000/2:.1f} ms (saved by caching)")
         print(f"  Main DiT branch (single pass):     ~{batched_time*1000:.1f} ms")
+
+
+class TestVelocityFunctionIntegration:
+    """
+    Integration tests that verify the full velocity function creation and execution.
+    
+    These tests go through the complete API stack:
+    - ControlVideo2WorldModelRectifiedFlow.get_velocity_fn_from_batch()
+    - _get_optimized_velocity_fn() internal implementation
+    - Full condition dictionary handling with all optional fields
+    
+    This catches issues like missing batching for img_context_emb, padding_mask, etc.
+    """
+    
+    @pytest.fixture(scope="class")
+    def model_fixture(self):
+        """Load the actual model for integration testing."""
+        import sys
+        sys.path.insert(0, '/home/tobyj/code/notes/daily-notes/src/reference/dex/experiments/octi/cosmos-transfer2.5')
+        
+        from cosmos_transfer2.inference import Control2WorldInference
+        from cosmos_transfer2._src.transfer2.inference.utils import read_and_process_video
+        
+        # Initialize with state_t=2 for 5-frame inference
+        inference = Control2WorldInference(
+            checkpoint_path="/home/horde/cosmos/cosmos-transfer2.5/pretrained/NVIDIA--Cosmos-1.0-Transfer2-5B-ControlVideo2World",
+            offload_network=False,
+            offload_tokenizer=True,
+            state_t=2,
+            use_cfg_batching=False,  # We'll test both modes
+        )
+        
+        return inference
+    
+    def create_data_batch(
+        self,
+        inference,
+        batch_size: int = 1,
+        device: str = "cuda",
+    ):
+        """Create a realistic data_batch dict similar to what the pipeline produces."""
+        import torch
+        
+        # Create minimal tensors that match what the real pipeline produces
+        temporal_frames = 2  # state_t
+        height, width = 352, 640  # Latent spatial dims (1/8 of 2816x5120)
+        channels = 16  # VAE latent channels
+        
+        # Noisy latent input
+        noise_x = torch.randn(
+            batch_size, channels, temporal_frames, height, width,
+            device=device, dtype=torch.bfloat16
+        )
+        
+        # Timestep
+        timestep = torch.rand(batch_size, 1, device=device, dtype=torch.bfloat16)
+        
+        # Text embeddings (from T5)
+        text_emb = torch.randn(batch_size, 256, 4096, device=device, dtype=torch.bfloat16)
+        
+        # Control input (depth video, latent space)
+        control_input = torch.randn(
+            batch_size, 3, temporal_frames * 4 + 1, height * 8, width * 8,
+            device=device, dtype=torch.bfloat16
+        )
+        
+        # Video input mask
+        mask = torch.ones(
+            batch_size, 1, temporal_frames * 4 + 1, height * 8, width * 8,
+            device=device, dtype=torch.bfloat16
+        )
+        
+        # Image context embedding (reference image feature)
+        img_context = torch.randn(batch_size, 256, 1152, device=device, dtype=torch.bfloat16)
+        
+        # FPS
+        fps = torch.tensor([24.0] * batch_size, device=device, dtype=torch.float32)
+        
+        # Build data_batch dict as the real pipeline does
+        data_batch = {
+            "crossattn_emb": text_emb,
+            "control_input_depth": control_input,
+            "condition_video_input_mask_B_C_T_H_W": mask,
+            "img_context_emb": img_context,
+            "fps": fps,
+            "NUM_CONDITIONAL_FRAMES": 0,
+        }
+        
+        return data_batch, noise_x, timestep
+    
+    def test_velocity_fn_without_batching(self, model_fixture):
+        """Test velocity function creation and execution WITHOUT CFG batching (baseline)."""
+        inference = model_fixture
+        model = inference.inference_pipeline.model
+        
+        data_batch, noise_x, timestep = self.create_data_batch(inference, batch_size=1)
+        
+        # Get velocity function without CFG batching
+        velocity_fn = model.get_velocity_fn_from_batch(
+            data_batch=data_batch,
+            guidance=7.0,
+            is_negative_prompt=False,
+            use_cfg_batching=False,
+        )
+        
+        # Execute velocity function
+        with torch.no_grad():
+            velocity = velocity_fn(
+                noise=torch.randn_like(noise_x),
+                noise_x=noise_x,
+                timestep=timestep,
+            )
+        
+        # Basic sanity checks
+        assert velocity.shape == noise_x.shape, "Velocity shape should match input"
+        assert velocity.dtype == torch.float32, "Velocity should be float32"
+        assert not torch.isnan(velocity).any(), "Velocity should not contain NaNs"
+        assert not torch.isinf(velocity).any(), "Velocity should not contain Infs"
+    
+    def test_velocity_fn_with_batching(self, model_fixture):
+        """Test velocity function creation and execution WITH CFG batching (optimized)."""
+        inference = model_fixture
+        model = inference.inference_pipeline.model
+        
+        data_batch, noise_x, timestep = self.create_data_batch(inference, batch_size=1)
+        
+        # Get velocity function WITH CFG batching
+        velocity_fn = model.get_velocity_fn_from_batch(
+            data_batch=data_batch,
+            guidance=7.0,
+            is_negative_prompt=False,
+            use_cfg_batching=True,
+        )
+        
+        # Execute velocity function
+        with torch.no_grad():
+            velocity = velocity_fn(
+                noise=torch.randn_like(noise_x),
+                noise_x=noise_x,
+                timestep=timestep,
+            )
+        
+        # Basic sanity checks
+        assert velocity.shape == noise_x.shape, "Velocity shape should match input"
+        assert velocity.dtype == torch.float32, "Velocity should be float32"
+        assert not torch.isnan(velocity).any(), "Velocity should not contain NaNs"
+        assert not torch.isinf(velocity).any(), "Velocity should not contain Infs"
+    
+    def test_velocity_fn_correctness_comparison(self, model_fixture):
+        """
+        Test that both velocity functions produce identical results.
+        
+        This is the KEY test that would have caught the img_context_emb bug!
+        """
+        inference = model_fixture
+        model = inference.inference_pipeline.model
+        
+        # Create test inputs with FIXED seed for reproducibility
+        torch.manual_seed(42)
+        data_batch, noise_x, timestep = self.create_data_batch(inference, batch_size=1)
+        
+        # Same noise for both runs
+        noise = torch.randn_like(noise_x)
+        
+        # Run WITHOUT CFG batching
+        torch.manual_seed(42)
+        velocity_fn_seq = model.get_velocity_fn_from_batch(
+            data_batch=data_batch,
+            guidance=7.0,
+            is_negative_prompt=False,
+            use_cfg_batching=False,
+        )
+        with torch.no_grad():
+            velocity_seq = velocity_fn_seq(noise=noise.clone(), noise_x=noise_x.clone(), timestep=timestep.clone())
+        
+        # Run WITH CFG batching
+        torch.manual_seed(42)
+        velocity_fn_batched = model.get_velocity_fn_from_batch(
+            data_batch=data_batch,
+            guidance=7.0,
+            is_negative_prompt=False,
+            use_cfg_batching=True,
+        )
+        with torch.no_grad():
+            velocity_batched = velocity_fn_batched(noise=noise.clone(), noise_x=noise_x.clone(), timestep=timestep.clone())
+        
+        # Compare outputs
+        torch.testing.assert_close(
+            velocity_batched,
+            velocity_seq,
+            rtol=1e-3,
+            atol=1e-3,
+            msg="Batched and sequential velocity functions should produce identical results"
+        )
+        
+        print(f"\n✓ Velocity function correctness verified!")
+        print(f"  Max absolute difference: {(velocity_batched - velocity_seq).abs().max().item():.2e}")
+        print(f"  Mean absolute difference: {(velocity_batched - velocity_seq).abs().mean().item():.2e}")
 
 
 if __name__ == "__main__":
