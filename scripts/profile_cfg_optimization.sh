@@ -35,12 +35,9 @@ echo ""
 nsys profile \
     --output="$OUTPUT_DIR/cfg_optimization_comparison.nsys-rep" \
     --force-overwrite=true \
-    --trace=cuda,nvtx,osrt \
+    --trace=cuda,nvtx \
     --cuda-memory-usage=true \
-    --gpu-metrics-device=all \
-    --gpu-metrics-frequency=10000 \
-    --sample=cpu \
-    --cpuctxsw=none \
+    --stats=true \
     /home/horde/cosmos/cosmos-transfer2.5/.venv/bin/python \
     tests/test_cfg_optimization_local.py \
     --depth-video "$DEPTH_VIDEO" \
