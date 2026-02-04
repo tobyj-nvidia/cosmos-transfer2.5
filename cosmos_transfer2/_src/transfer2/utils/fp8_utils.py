@@ -22,6 +22,8 @@ def create_fp8_recipe(
     fp8_format: str = "HYBRID",
     amax_history_len: int = 1024,
     amax_compute_algo: str = "max",
+    fp8_dpa: bool = True,  # Enable FP8 for DotProductAttention
+    fp8_mha: bool = True,  # Enable FP8 for Multi-Head Attention
 ) -> Optional:
     """
     Create FP8 recipe for inference.
@@ -32,6 +34,8 @@ def create_fp8_recipe(
         fp8_format: "HYBRID" uses E4M3 for forward, E5M2 for backward
         amax_history_len: History length for max absolute value tracking
         amax_compute_algo: Algorithm for computing amax ("max" or "most_recent")
+        fp8_dpa: Enable FP8 for DotProductAttention (critical for speedup!)
+        fp8_mha: Enable FP8 for Multi-Head Attention
     
     Returns:
         DelayedScaling recipe if Transformer Engine available, else None
@@ -45,6 +49,8 @@ def create_fp8_recipe(
         fp8_format=getattr(Format, fp8_format),
         amax_history_len=amax_history_len,
         amax_compute_algo=amax_compute_algo,
+        fp8_dpa=fp8_dpa,  # Enable FP8 for attention
+        fp8_mha=fp8_mha,  # Enable FP8 for multi-head attention
     )
 
 
