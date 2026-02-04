@@ -1,0 +1,78 @@
+(cosmos-transfer2) (base) horde@tobyj-6000-pro-server:~/cosmos/cosmos-transfer2.5/tests$ python ./run_transfer.py ~/isaaclab-warp/scale_test/env_008/depth_video.mp4 \
+    "Photorealistic Kuka robot arms with dexterous Allegro hands, solid brushed metal finish, manipulating glossy blue cubes, industrial factory environment, professional studio lighting, 8K detail, 4x2 grid of robots" \
+    --control depth --use-input-as-control --control-weight 1.0 \
+    --style-image kuka-reference-image.png --guidance 7.0 --num-steps 35
+============================================================
+Cosmos Transfer 2.5 Inference (run_transfer.py v0.5.1)
+============================================================
+Input video:    /home/horde/isaaclab-warp/scale_test/env_008/depth_video.mp4
+Prompt:         Photorealistic Kuka robot arms with dexterous Allegro hands, solid brushed metal finish, manipulating glossy blue cubes, industrial factory environment, professional studio lighting, 8K detail, 4x2 grid of robots
+Control:        depth (weight=1.0)
+Control video:  (using input video directly)
+Style image:    kuka-reference-image.png
+Guidance:       7.0
+Num steps:      35
+Output dir:     /home/horde/isaaclab-warp/scale_test/env_008/cosmos_output_20260123_154654
+============================================================
+
+[1/3] Loading model...
+[01-23 15:46:57|INFO|../cosmos_transfer2/_src/imaginaire/utils/checkpoint_db.py:171:path] Downloading checkpoint nvidia/Cosmos-Guardrail1(9c7b7da4-2d95-45bb-9cb8-2eed954e9736)
+[01-23 15:46:57|INFO|../cosmos_transfer2/_src/imaginaire/utils/checkpoint_db.py:131:_download] Downloading checkpoint from Hugging Face with {'repo_id': 'nvidia/Cosmos-Guardrail1', 'repo_type': 'model', 'revision': 'd6d4bfa899a71454a700907664f3e88f503950cf', 'allow_patterns': ['*']}
+Fetching 102 files: 100%|███████████████████████████████████████████████████████████████| 102/102 [00:00<00:00, 871.65it/s]
+[01-23 15:47:17|INFO|../cosmos_transfer2/_src/imaginaire/utils/checkpoint_db.py:171:path] Downloading checkpoint nvidia/Cosmos-Transfer2.5-2B/general/depth(626e6618-bfcd-4d9a-a077-1409e2ce353f)
+[01-23 15:47:17|INFO|../cosmos_transfer2/_src/imaginaire/utils/checkpoint_db.py:96:_download] Downloading checkpoint file from Hugging Face with {'repo_id': 'nvidia/Cosmos-Transfer2.5-2B', 'repo_type': 'model', 'revision': 'dea7737ca29dd8d9086413c6dc5724b8250a0bb4', 'filename': 'general/depth/626e6618-bfcd-4d9a-a077-1409e2ce353f_ema_bf16.pt'}
+[01-23 15:47:26|INFO|../cosmos_transfer2/_src/imaginaire/utils/checkpoint_db.py:171:path] Downloading checkpoint nvidia/Cosmos-Transfer2.5-2B/auto/multiview(4ecc66e9-df19-4aed-9802-0d11e057287a)
+[01-23 15:47:26|INFO|../cosmos_transfer2/_src/imaginaire/utils/checkpoint_db.py:96:_download] Downloading checkpoint file from Hugging Face with {'repo_id': 'nvidia/Cosmos-Transfer2.5-2B', 'repo_type': 'model', 'revision': '00c591edab119e8a6ca06e6e091351a04ce0ecc9', 'filename': 'auto/multiview/4ecc66e9-df19-4aed-9802-0d11e057287a_ema_bf16.pt'}
+[01-23 15:47:26|INFO|../cosmos_transfer2/_src/imaginaire/utils/checkpoint_db.py:96:_download] Downloading checkpoint file from Hugging Face with {'repo_id': 'nvidia/Cosmos-Transfer2.5-2B', 'repo_type': 'model', 'revision': 'b67b64abda3801a9aceddbff2bdb86126c06db74', 'filename': 'general/edge/61f5694b-0ad5-4ecd-8ad7-c8545627d125_ema_bf16.pt'}
+[01-23 15:47:26|INFO|../cosmos_transfer2/_src/imaginaire/utils/checkpoint_db.py:96:_download] Downloading checkpoint file from Hugging Face with {'repo_id': 'nvidia/Cosmos-Transfer2.5-2B', 'repo_type': 'model', 'revision': '23057a4167b89de89a4a397fdbf3887994d115eb', 'filename': 'general/seg/5136ef49-6d8d-42e8-8abf-7dac722a304a_ema_bf16.pt'}
+[01-23 15:47:26|INFO|../cosmos_transfer2/_src/imaginaire/utils/checkpoint_db.py:96:_download] Downloading checkpoint file from Hugging Face with {'repo_id': 'nvidia/Cosmos-Transfer2.5-2B', 'repo_type': 'model', 'revision': 'eb5325b77d358944da58a690157dd2b8071bbf85', 'filename': 'general/blur/ba2f44f2-c726-4fe7-949f-597069d9b91c_ema_bf16.pt'}
+[01-23 15:47:26|INFO|../cosmos_transfer2/_src/imaginaire/utils/checkpoint_db.py:171:path] Downloading checkpoint Wan2.1/vae(685afcaa-4de2-42fe-b7b9-69f7a2dee4d8)
+[01-23 15:47:26|INFO|../cosmos_transfer2/_src/imaginaire/utils/checkpoint_db.py:96:_download] Downloading checkpoint file from Hugging Face with {'repo_id': 'nvidia/Cosmos-Predict2.5-2B', 'repo_type': 'model', 'revision': '6787e176dce74a101d922174a95dba29fa5f0c55', 'filename': 'tokenizer.pth'}
+[01-23 15:47:57|INFO|../cosmos_transfer2/_src/imaginaire/utils/checkpoint_db.py:171:path] Downloading checkpoint Qwen/Qwen2.5-VL-7B-Instruct(7219c6c7-f878-4137-bbdb-76842ea85e70)
+[01-23 15:47:57|INFO|../cosmos_transfer2/_src/imaginaire/utils/checkpoint_db.py:131:_download] Downloading checkpoint from Hugging Face with {'repo_id': 'nvidia/Cosmos-Reason1-7B', 'repo_type': 'model', 'revision': '3210bec0495fdc7a8d3dbb8d58da5711eab4b423', 'allow_patterns': ['*']}
+Fetching 13 files: 100%|█████████████████████████████████████████████████████████████████| 13/13 [00:00<00:00, 2364.01it/s]
+[01-23 15:47:59|INFO|../cosmos_transfer2/_src/imaginaire/utils/checkpoint_db.py:171:path] Downloading checkpoint nvidia/Cosmos-Reason1.1-7B(cb3e3ffa-7b08-4c34-822d-61c7aa31a14f)
+[01-23 15:47:59|INFO|../cosmos_transfer2/_src/imaginaire/utils/checkpoint_db.py:131:_download] Downloading checkpoint from Hugging Face with {'repo_id': 'nvidia/Cosmos-Reason1-7B', 'repo_type': 'model', 'revision': '3210bec0495fdc7a8d3dbb8d58da5711eab4b423', 'allow_patterns': ['*']}
+Fetching 13 files: 100%|█████████████████████████████████████████████████████████████████| 13/13 [00:00<00:00, 3003.69it/s]
+[01-23 15:48:51|INFO|../cosmos_transfer2/inference.py:103:__init__] Found 1 hint keys across all samples
+[01-23 15:48:51|INFO|../cosmos_transfer2/inference.py:113:__init__] Saved config to /home/horde/isaaclab-warp/scale_test/env_008/cosmos_output_20260123_154654/config.yaml
+    Model loaded in 1m 57.09s
+
+[2/3] Generating video...
+[01-23 15:48:51|INFO|../cosmos_transfer2/inference.py:120:generate] Generating 1 samples: ['depth_video']
+[01-23 15:48:51|INFO|../cosmos_transfer2/inference.py:124:generate] [1/1] Processing sample depth_video
+[01-23 15:48:51|INFO|../cosmos_transfer2/inference.py:155:_generate_sample] Saved arguments to /home/horde/isaaclab-warp/scale_test/env_008/cosmos_output_20260123_154654/depth_video.json
+[01-23 15:48:51|INFO|../cosmos_transfer2/inference.py:160:_generate_sample] Running guardrail check on prompt...
+[01-23 15:48:57|SUCCESS|../cosmos_transfer2/inference.py:170:_generate_sample] Passed guardrail on prompt
+[01-23 15:48:58|SUCCESS|../cosmos_transfer2/inference.py:183:_generate_sample] Passed guardrail on negative prompt
+[01-23 15:48:58|INFO|../cosmos_transfer2/inference.py:188:_generate_sample] Processing the following paths: {'depth': '/home/horde/isaaclab-warp/scale_test/env_008/depth_video.mp4', 'depth_mask': None, 'depth_mask_prompt': None}
+Generating samples: 100%|██████████████████████████████████████████████████████████████████| 35/35 [08:49<00:00, 15.14s/it]
+[01-23 15:58:23|INFO|../cosmos_transfer2/inference.py:244:_generate_sample] depth control video saved to /home/horde/isaaclab-warp/scale_test/env_008/cosmos_output_20260123_154654/depth_video_control_depth.mp4
+[01-23 15:58:23|INFO|../cosmos_transfer2/inference.py:252:_generate_sample] Running guardrail check on video...
+[01-23 15:58:33|SUCCESS|../cosmos_transfer2/inference.py:262:_generate_sample] Passed guardrail on generated video
+[01-23 15:58:36|SUCCESS|../cosmos_transfer2/inference.py:276:_generate_sample] Generated video saved to /home/horde/isaaclab-warp/scale_test/env_008/cosmos_output_20260123_154654/depth_video.mp4
+    Generation completed in 9m 44.93s
+
+[3/3] Cleaning up...
+
+============================================================
+TIMING SUMMARY
+============================================================
+Model Load:        1m 57.09s
+Generation:        9m 44.93s
+Cleanup:               0.00s
+------------------------------------------------------------
+TOTAL:            11m 42.02s
+============================================================
+
+GPU STATISTICS
+============================================================
+Memory Used:     51.3 GB avg,  94.6 GB max / 95.6 GB total
+GPU Util:          83.1% avg,   100.0% max
+Power Draw:       435.0W avg,   608.8W max
+Temperature:       77.4°C avg,    87.0°C max
+Samples:        1188 @ 0.5s interval
+============================================================
+
+Output video: /home/horde/isaaclab-warp/scale_test/env_008/cosmos_output_20260123_154654/depth_video.mp4
+Timing report: /home/horde/isaaclab-warp/scale_test/env_008/cosmos_output_20260123_154654/timing_report.json

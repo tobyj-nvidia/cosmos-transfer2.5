@@ -848,24 +848,37 @@ class TestAPIWithMockTensors:
     
     def test_batched_hints_shape(self):
         """
-        Test that hints batching produces correct shapes.
+        Test that hints batching produces correct shapes using semantic checks.
         
-        Hints can be [num_blocks, B, T, H, W, D] or [num_blocks, T, H, W, D]
+        Hints from compute_control_hints have shape [num_blocks, B, T, H, W, D]
+        We should check batch dimension by comparing hints.shape[1] to expected batch_size,
+        NOT by checking if dim() == 6 (brittle magic number).
         """
-        # Test with explicit batch dimension
-        hints_with_batch = torch.randn(12, 1, 2, 88, 160, 1536)  # [num_blocks, B=1, T, H, W, D]
-        hints_batched = torch.cat([hints_with_batch, hints_with_batch], dim=1)  # Batch along dim 1
-        assert hints_batched.shape == (12, 2, 2, 88, 160, 1536), f"Expected (12, 2, 2, 88, 160, 1536), got {hints_batched.shape}"
+        num_blocks = 12
+        batch_size = 1
+        T, H, W, D = 2, 88, 160, 1536
         
-        # Test without explicit batch dimension (edge case)
-        hints_no_batch = torch.randn(12, 2, 88, 160, 1536)  # [num_blocks, T, H, W, D]
-        # For this case, we'd need to unsqueeze and cat
-        hints_batched_v2 = torch.cat([hints_no_batch.unsqueeze(1), hints_no_batch.unsqueeze(1)], dim=1)
-        assert hints_batched_v2.shape == (12, 2, 2, 88, 160, 1536), f"Expected (12, 2, 2, 88, 160, 1536), got {hints_batched_v2.shape}"
+        # Create hints with explicit batch dimension (as returned by compute_control_hints)
+        hints = torch.randn(num_blocks, batch_size, T, H, W, D)  # [num_blocks, B=1, T, H, W, D]
         
-        print("\n✓ Hints batching produces correct shapes")
-        print(f"  With batch dim: {list(hints_with_batch.shape)} -> {list(hints_batched.shape)}")
-        print(f"  Without batch dim: {list(hints_no_batch.shape)} -> {list(hints_batched_v2.shape)}")
+        # ROBUST CHECK: Verify dimension 1 is batch dimension by comparing to batch_size
+        assert hints.shape[1] == batch_size, f"Expected hints.shape[1]={batch_size}, got {hints.shape[1]}"
+        
+        # Batch along dim=1 (the batch dimension)
+        hints_batched = torch.cat([hints, hints], dim=1)
+        expected_shape = (num_blocks, 2 * batch_size, T, H, W, D)
+        assert hints_batched.shape == expected_shape, f"Expected {expected_shape}, got {hints_batched.shape}"
+        
+        # Verify that after unbinding, each hint has correct shape [B, T, H, W, D]
+        hints_list = torch.unbind(hints_batched, dim=0)
+        assert len(hints_list) == num_blocks, f"Should have {num_blocks} hints, got {len(hints_list)}"
+        assert hints_list[0].shape == (2, T, H, W, D), f"Each hint should be [B=2, T, H, W, D], got {hints_list[0].shape}"
+        
+        print("\n✓ Hints batching uses semantic check (not magic number)")
+        print(f"  Check: hints.shape[1] == batch_size ({hints.shape[1]} == {batch_size})")
+        print(f"  Input: {list(hints.shape)}")
+        print(f"  Batched: {list(hints_batched.shape)} (concatenated along dim=1)")
+        print(f"  After unbind: {len(hints_list)} hints of shape {list(hints_list[0].shape)}")
     
     def test_all_optional_fields_handled(self):
         """

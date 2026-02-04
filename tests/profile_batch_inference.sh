@@ -71,6 +71,8 @@ nsys profile \
     --output="$OUTPUT_DIR/cosmos_batch_inference" \
     --trace=cuda,nvtx \
     --cuda-memory-usage=true \
+    --gpu-metrics-device all \
+    --gpu-metrics-frequency 10000 \
     --stats=true \
     --force-overwrite=true \
     python tests/test_batch_inference_real.py \
@@ -155,6 +157,8 @@ nsys profile \
     --output="$OUTPUT_DIR/cosmos_sequential_inference" \
     --trace=cuda,nvtx \
     --cuda-memory-usage=true \
+    --gpu-metrics-device all \
+    --gpu-metrics-frequency 10000 \
     --stats=true \
     --force-overwrite=true \
     python "$OUTPUT_DIR/test_sequential_only.py" \

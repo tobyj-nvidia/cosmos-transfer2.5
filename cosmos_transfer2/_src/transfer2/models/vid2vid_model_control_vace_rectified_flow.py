@@ -420,10 +420,16 @@ class ControlVideo2WorldModelRectifiedFlow(Video2WorldModelRectifiedFlow):
             mask_batched = torch.cat([mask_cond, mask_uncond], dim=0) if mask_cond is not None else None
             
             # Stack hints for batch (same hints for both)
-            if hints.dim() == 5:  # [num_blocks, B, T, H, W, D] - with B dimension
-                hints_batched = torch.cat([hints, hints], dim=1)
-            else:  # [num_blocks, T, H, W, D] - without explicit B dimension
-                hints_batched = torch.cat([hints.unsqueeze(1), hints.unsqueeze(1)], dim=1)
+            # hints from compute_control_hints has shape [num_blocks, B, T, H, W, D]
+            # Check if dimension 1 is the batch dimension by comparing to input batch size
+            if hints.shape[1] == batch_size:  # Dimension 1 is batch dimension
+                hints_batched = torch.cat([hints, hints], dim=1)  # Concatenate along batch dimension
+            else:
+                # If no batch dimension, add it (shouldn't happen with compute_control_hints)
+                raise ValueError(
+                    f"Expected hints to have batch dimension at dim=1 with size {batch_size}, "
+                    f"but got hints.shape={hints.shape}"
+                )
             
             # Handle other optional inputs
             fps_cond = cond_dict.get("fps")
